@@ -1,0 +1,94 @@
+# Production docker-compose — app containers only.
+# Databases are AWS managed services (RDS, ElastiCache, OpenSearch).
+# All ${VAR} values are injected by AWS ECS from Secrets Manager.
+# This file is also useful for testing production config locally:
+#   docker-compose -f docker-compose.prod.yml up
+#
+# To use locally, export the AWS URLs as shell variables first:
+#   export DATABASE_URL_CORE=postgres://core:secret@your-rds.us-east-1.rds.amazonaws.com:5432/core_db
+#   export DATABASE_URL_PAYMENTS=postgres://payments:secret@your-rds.us-east-1.rds.amazonaws.com:5432/payments_db
+#   export REDIS_URL=redis://your-cluster.cache.amazonaws.com:6379
+#   export OPENSEARCH_URL=https://your-domain.us-east-1.es.amazonaws.com
+#   export FIREBASE_SERVICE_ACCOUNT_BASE64=eyJ0eXBlIjoic2VydmljZV9hY2NvdW50...
+
+version: "3.9"
+
+networks:
+  app_net:
+    driver: bridge
+  payments_net:
+    driver: bridge
+
+services:
+  core-api:
+    image: ${ECR_REGISTRY}/pure-core-api:${IMAGE_TAG:-latest}
+    networks: [app_net]
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      # ── AWS RDS ──────────────────────────────────────────────────────────
+      DATABASE_URL: ${DATABASE_URL_CORE}
+      # ── AWS ElastiCache ───────────────────────────────────────────────────
+      REDIS_URL: ${REDIS_URL}
+      # ── Firebase Admin ────────────────────────────────────────────────────
+      FIREBASE_SERVICE_ACCOUNT_BASE64: ${FIREBASE_SERVICE_ACCOUNT_BASE64}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  search-service:
+    image: ${ECR_REGISTRY}/pure-search-service:${IMAGE_TAG:-latest}
+    networks: [app_net]
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+      GIN_MODE: release
+      # ── Amazon OpenSearch ─────────────────────────────────────────────────
+      OPENSEARCH_URL: ${OPENSEARCH_URL}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  payment-service:
+    image: ${ECR_REGISTRY}/pure-payment-service:${IMAGE_TAG:-latest}
+    networks: [app_net, payments_net]
+    ports:
+      - "3002:3002"
+    environment:
+      PORT: "3002"
+      RUST_LOG: info
+      # ── AWS RDS (payments) ────────────────────────────────────────────────
+      DATABASE_URL: ${DATABASE_URL_PAYMENTS}
+      # ── AWS ElastiCache ───────────────────────────────────────────────────
+      REDIS_URL: ${REDIS_URL}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3002/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  ai-service:
+    image: ${ECR_REGISTRY}/pure-ai-service:${IMAGE_TAG:-latest}
+    networks: [app_net]
+    ports:
+      - "3003:3003"
+    environment:
+      PORT: "3003"
+      # ── AWS ElastiCache ───────────────────────────────────────────────────
+      REDIS_URL: ${REDIS_URL}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3003/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
