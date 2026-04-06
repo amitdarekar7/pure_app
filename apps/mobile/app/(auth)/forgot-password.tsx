@@ -1,5 +1,6 @@
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,6 +14,8 @@ import { useRouter } from 'expo-router'
 import { useState } from 'react'
 import { sendPasswordResetEmail } from 'firebase/auth'
 import { firebaseAuth } from '../../lib/firebase'
+
+const LOGO = require('../../assets/images/logo_pure.jpeg')
 
 export default function ForgotPasswordScreen() {
   const router = useRouter()
@@ -67,11 +70,7 @@ export default function ForgotPasswordScreen() {
 
           {/* Brand */}
           <View style={styles.brand}>
-            <View style={styles.logoDiamond}>
-              <Text style={styles.logoDiamondText}>◆</Text>
-            </View>
-            <Text style={styles.logoWord}>PURE</Text>
-            <Text style={styles.logoTagline}>BEAUTY & WELLNESS</Text>
+            <Image source={LOGO} style={styles.logoImage} resizeMode="contain" />
           </View>
 
           <Text style={styles.title}>Reset Password</Text>
@@ -150,18 +149,7 @@ const styles = StyleSheet.create({
   },
 
   brand:         { alignItems: 'center', marginBottom: 20 },
-  logoDiamond: {
-    width:           52,
-    height:          52,
-    borderRadius:    14,
-    backgroundColor: '#0f0f23',
-    alignItems:      'center',
-    justifyContent:  'center',
-    marginBottom:    10,
-  },
-  logoDiamondText: { color: '#7c6af7', fontSize: 26 },
-  logoWord:    { color: '#0f0f23', fontSize: 26, fontWeight: '900', letterSpacing: 5 },
-  logoTagline: { color: '#7c6af7', fontSize: 9,  fontWeight: '700', letterSpacing: 3, marginTop: 2 },
+  logoImage:   { width: 160, height: 64, marginBottom: 4 },
 
   title:    { color: '#0f0f23', fontSize: 20, fontWeight: '800', textAlign: 'center', marginTop: 16, marginBottom: 6 },
   subtitle: { color: '#888',    fontSize: 13, textAlign: 'center', lineHeight: 19, marginBottom: 22 },

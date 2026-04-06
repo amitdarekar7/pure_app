@@ -1,4 +1,5 @@
 import {
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -6,14 +7,15 @@ import {
   TextInput,
   View,
 } from 'react-native'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'expo-router'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { useAuth } from '../../lib/auth-context'
+import { LocationAPI, ProvidersAPI, City, Area, Provider } from '../../lib/api'
+
+const LOGO = require('../../assets/images/logo_pure.jpeg')
 
 type MCIcon = React.ComponentProps<typeof MaterialCommunityIcons>['name']
-
-const CITIES = ['Mumbai', 'Delhi', 'Bangalore', 'Hyderabad', 'Chennai', 'Pune', 'Kolkata', 'Ahmedabad']
 
 const CATEGORIES: { id: string; icon: MCIcon; label: string; sub: string; bg: string; iconColor: string }[] = [
   { id: 'haircut',       icon: 'content-cut',           label: 'Hair Cut',        sub: 'Salons & Stylists',     bg: '#fce4ec', iconColor: '#ad1457' },
@@ -33,9 +35,54 @@ const CATEGORIES: { id: string; icon: MCIcon; label: string; sub: string; bg: st
 export default function HomeScreen() {
   const { user }                        = useAuth()
   const router                          = useRouter()
-  const [city,       setCity]           = useState('Mumbai')
+
+  // ── Location state ──────────────────────────────────────────────────────
+  const [cities,     setCities]         = useState<City[]>([])
+  const [city,       setCity]           = useState<City | null>(null)
   const [showCities, setShowCities]     = useState(false)
+  const [areas,      setAreas]          = useState<Area[]>([])
+  const [area,       setArea]           = useState<Area | null>(null)
+  const [showAreas,  setShowAreas]      = useState(false)
+
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  const [providers,        setProviders]         = useState<Provider[]>([])
+  const [loadingProviders, setLoadingProviders]  = useState(false)
+
   const [searchText, setSearchText]     = useState('')
+
+  // Fetch providers when city + category are both selected
+  useEffect(() => {
+    if (!city || !selectedCategory) { setProviders([]); return }
+    setLoadingProviders(true)
+    ProvidersAPI.list(city.id, selectedCategory)
+      .then(({ providers: data }) => setProviders(data))
+      .catch(() => setProviders([]))
+      .finally(() => setLoadingProviders(false))
+  }, [city, selectedCategory])
+
+  function handleCategoryPress(catId: string) {
+    if (!city) {
+      // bounce them to open the city selector
+      setShowCities(true)
+      return
+    }
+    setSelectedCategory(prev => prev === catId ? null : catId)
+  }
+  useEffect(() => {
+    LocationAPI.cities()
+      .then(({ cities: data }) => setCities(data))
+      .catch(() => setCities([]))
+  }, [])
+
+  // Fetch areas whenever the selected city changes
+  useEffect(() => {
+    if (!city) { setAreas([]); setArea(null); return }
+    setArea(null)
+    setAreas([])
+    LocationAPI.areas(city.id)
+      .then(({ areas: data }) => setAreas(data))
+      .catch(() => setAreas([]))
+  }, [city])
 
   function handleSearch() {
     router.push('/(tabs)/search')
@@ -52,15 +99,7 @@ export default function HomeScreen() {
 
         {/* ── Header ───────────────────────────────────────────── */}
         <View style={styles.header}>
-          <View style={styles.logoRow}>
-            <View style={styles.logoDiamond}>
-              <Text style={styles.logoDiamondText}>◆</Text>
-            </View>
-            <View>
-              <Text style={styles.logoWord}>PURE</Text>
-              <Text style={styles.logoTagline}>BEAUTY & WELLNESS</Text>
-            </View>
-          </View>
+          <Image source={LOGO} style={styles.logoImage} resizeMode="contain" />
 
           {user ? (
             <Pressable
@@ -91,10 +130,10 @@ export default function HomeScreen() {
         </View>
 
         {/* ── Location selector ────────────────────────────────── */}
-        <Pressable style={styles.locationBar} onPress={() => setShowCities(!showCities)}>
+        <Pressable style={styles.locationBar} onPress={() => { setShowCities(!showCities); setShowAreas(false) }}>
           <Ionicons name="location-sharp" size={15} color="#7c6af7" />
           <Text style={styles.locationLabel}>City</Text>
-          <Text style={styles.locationCity}>{city}</Text>
+          <Text style={styles.locationCity}>{city ? city.name : 'Select city…'}</Text>
           <Ionicons
             name={showCities ? 'chevron-up' : 'chevron-down'}
             size={14}
@@ -104,18 +143,65 @@ export default function HomeScreen() {
 
         {showCities && (
           <View style={styles.cityDropdown}>
-            {CITIES.map(c => (
+            {cities.map(c => (
               <Pressable
-                key={c}
-                style={[styles.cityItem, c === city && styles.cityItemActive]}
+                key={c.id}
+                style={[styles.cityItem, c.id === city?.id && styles.cityItemActive]}
                 onPress={() => { setCity(c); setShowCities(false) }}
               >
-                <Text style={[styles.cityItemText, c === city && styles.cityItemTextActive]}>
-                  {c}
-                </Text>
-                {c === city && <Ionicons name="checkmark" size={14} color="#7c6af7" />}
+                <View>
+                  <Text style={[styles.cityItemText, c.id === city?.id && styles.cityItemTextActive]}>
+                    {c.name}
+                  </Text>
+                  <Text style={styles.cityItemState}>{c.state}</Text>
+                </View>
+                {c.id === city?.id && <Ionicons name="checkmark" size={14} color="#7c6af7" />}
               </Pressable>
             ))}
+          </View>
+        )}
+
+        {/* ── Area selector (shown only after a city is chosen) ─ */}
+        {city && (
+          <Pressable style={styles.locationBar} onPress={() => { setShowAreas(!showAreas); setShowCities(false) }}>
+            <Ionicons name="map-outline" size={15} color="#7c6af7" />
+            <Text style={styles.locationLabel}>Area</Text>
+            <Text style={styles.locationCity}>{area ? area.name : 'Select area…'}</Text>
+            <Ionicons
+              name={showAreas ? 'chevron-up' : 'chevron-down'}
+              size={14}
+              color="#999"
+            />
+          </Pressable>
+        )}
+
+        {showAreas && areas.length > 0 && (
+          <View style={styles.cityDropdown}>
+            {areas.map(a => (
+              <Pressable
+                key={a.id}
+                style={[styles.cityItem, a.id === area?.id && styles.cityItemActive]}
+                onPress={() => { setArea(a); setShowAreas(false) }}
+              >
+                <View>
+                  <Text style={[styles.cityItemText, a.id === area?.id && styles.cityItemTextActive]}>
+                    {a.name}
+                  </Text>
+                  {a.pincode && <Text style={styles.cityItemState}>{a.pincode}</Text>}
+                </View>
+                {a.id === area?.id && <Ionicons name="checkmark" size={14} color="#7c6af7" />}
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {/* ── Nudge banner (shown when city/area not selected) ─── */}
+        {!city && (
+          <View style={styles.nudgeBanner}>
+            <Ionicons name="location-outline" size={16} color="#7c6af7" />
+            <Text style={styles.nudgeText}>
+              Set your city &amp; area to get personalised results
+            </Text>
           </View>
         )}
 
@@ -124,7 +210,11 @@ export default function HomeScreen() {
           <Ionicons name="search-outline" size={17} color="#aaa" />
           <TextInput
             style={styles.searchInput}
-            placeholder={`Search in ${city} — salons, services…`}
+            placeholder={
+              city
+                ? `Search in ${area ? area.name + ', ' : ''}${city.name} — salons, services…`
+                : 'Search salons, services…'
+            }
             placeholderTextColor="#999"
             value={searchText}
             onChangeText={setSearchText}
@@ -145,15 +235,74 @@ export default function HomeScreen() {
         {/* ── Category grid ────────────────────────────────────── */}
         <View style={styles.grid}>
           {CATEGORIES.map(cat => (
-            <Pressable key={cat.id} style={styles.catCard} onPress={handleSearch}>
-              <View style={[styles.catIconBox, { backgroundColor: cat.bg }]}>
-                <MaterialCommunityIcons name={cat.icon} size={30} color={cat.iconColor} />
+            <Pressable key={cat.id} style={styles.catCard} onPress={() => handleCategoryPress(cat.id)}>
+              <View style={[styles.catIconBox, { backgroundColor: selectedCategory === cat.id ? cat.iconColor : cat.bg }]}>
+                <MaterialCommunityIcons
+                  name={cat.icon}
+                  size={30}
+                  color={selectedCategory === cat.id ? '#fff' : cat.iconColor}
+                />
               </View>
               <Text style={[styles.catLabel, { color: cat.iconColor }]}>{cat.label}</Text>
               <Text style={styles.catSub} numberOfLines={1}>{cat.sub}</Text>
             </Pressable>
           ))}
         </View>
+
+        {/* ── Provider listing (shown after category tap) ─────── */}
+        {selectedCategory && (
+          <View>
+            <View style={styles.sectionRow}>
+              <Text style={styles.sectionTitle}>
+                {CATEGORIES.find(c => c.id === selectedCategory)?.label ?? 'Services'}
+              </Text>
+              <Text style={styles.sectionSub}>
+                {city ? `Providers in ${city.name}` : 'Select a city to see providers'}
+              </Text>
+            </View>
+
+            {loadingProviders && (
+              <View style={styles.providerEmpty}>
+                <Text style={styles.providerEmptyText}>Loading…</Text>
+              </View>
+            )}
+
+            {!loadingProviders && providers.length === 0 && (
+              <View style={styles.providerEmpty}>
+                <Ionicons name="storefront-outline" size={28} color="#ccc" />
+                <Text style={styles.providerEmptyText}>No providers found in {city?.name}</Text>
+              </View>
+            )}
+
+            {!loadingProviders && providers.map(p => (
+              <View key={p.service_id} style={styles.providerCard}>
+                <View style={styles.providerLeft}>
+                  <View style={styles.providerInitial}>
+                    <Text style={styles.providerInitialText}>{p.name[0]}</Text>
+                  </View>
+                  <View style={styles.providerInfo}>
+                    <Text style={styles.providerName}>{p.name}</Text>
+                    {p.area_name && (
+                      <Text style={styles.providerArea}>
+                        <Ionicons name="location-outline" size={11} color="#aaa" /> {p.area_name}
+                      </Text>
+                    )}
+                    <Text style={styles.providerService}>{p.service_title}</Text>
+                  </View>
+                </View>
+                <View style={styles.providerRight}>
+                  <Text style={styles.providerPrice}>
+                    ₹{Math.round(p.price_paise / 100)}
+                  </Text>
+                  <Text style={styles.providerDuration}>{p.duration_mins} min</Text>
+                  <Pressable style={styles.bookBtn} onPress={() => router.push('/(tabs)/search')}>
+                    <Text style={styles.bookBtnText}>Book</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* ── Logged-in strip ──────────────────────────────────── */}
         {user && (
@@ -175,14 +324,14 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  root:  { flex: 1, backgroundColor: '#f5f5f7' },
+  root:  { flex: 1, backgroundColor: '#f8f8f8' },
   scroll: { alignItems: 'center', padding: 16 },
 
   // Centered white card — looks great on both mobile & web
   card: {
     width:        '100%',
     maxWidth:     520,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#f8f8f8',
     borderRadius: 20,
     padding:      20,
     shadowColor:  '#000',
@@ -199,18 +348,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom:   20,
   },
-  logoRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  logoDiamond: {
-    width:           44,
-    height:          44,
-    borderRadius:    12,
-    backgroundColor: '#0f0f23',
-    alignItems:      'center',
-    justifyContent:  'center',
+  logoImage: {
+    width:  160,
+    height: 56,
   },
-  logoDiamondText: { color: '#7c6af7', fontSize: 22 },
-  logoWord:    { color: '#0f0f23', fontSize: 22, fontWeight: '900', letterSpacing: 4 },
-  logoTagline: { color: '#7c6af7', fontSize: 9,  fontWeight: '700', letterSpacing: 3, marginTop: 1 },
 
   avatarRow: {
     flexDirection:   'row',
@@ -284,6 +425,22 @@ const styles = StyleSheet.create({
   cityItemActive:     { backgroundColor: '#f0eeff' },
   cityItemText:       { color: '#555', fontSize: 14 },
   cityItemTextActive: { color: '#7c6af7', fontWeight: '700' },
+  cityItemState:      { color: '#bbb', fontSize: 11, marginTop: 1 },
+
+  // ── Nudge banner ────────────────────────────────────────────────────
+  nudgeBanner: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               8,
+    backgroundColor:   '#f0eeff',
+    borderRadius:      10,
+    paddingHorizontal: 14,
+    paddingVertical:   10,
+    marginBottom:      10,
+    borderWidth:       1,
+    borderColor:       '#d9d4ff',
+  },
+  nudgeText: { color: '#7c6af7', fontSize: 13, fontWeight: '600', flex: 1 },
 
   // ── Search ─────────────────────────────────────────────────────────
   searchBox: {
@@ -339,6 +496,51 @@ const styles = StyleSheet.create({
   },
   catLabel:  { fontSize: 12, fontWeight: '800', textAlign: 'center', marginBottom: 2 },
   catSub:    { color: '#aaa', fontSize: 10, textAlign: 'center' },
+
+  // ── Provider cards ────────────────────────────────────────────────
+  providerCard: {
+    flexDirection:   'row',
+    alignItems:      'center',
+    justifyContent:  'space-between',
+    backgroundColor: '#fff',
+    borderRadius:    12,
+    padding:         13,
+    marginBottom:    10,
+    borderWidth:     1,
+    borderColor:     '#ebebf5',
+  },
+  providerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 },
+  providerInitial: {
+    width:           40,
+    height:          40,
+    borderRadius:    20,
+    backgroundColor: '#0f0f23',
+    alignItems:      'center',
+    justifyContent:  'center',
+    flexShrink:      0,
+  },
+  providerInitialText: { color: '#7c6af7', fontWeight: '900', fontSize: 17 },
+  providerInfo:        { flex: 1 },
+  providerName:        { color: '#0f0f23', fontWeight: '800', fontSize: 14, marginBottom: 2 },
+  providerArea:        { color: '#aaa', fontSize: 11, marginBottom: 2 },
+  providerService:     { color: '#7c6af7', fontSize: 12, fontWeight: '600' },
+  providerRight:       { alignItems: 'flex-end', gap: 3, marginLeft: 8 },
+  providerPrice:       { color: '#0f0f23', fontWeight: '900', fontSize: 15 },
+  providerDuration:    { color: '#aaa', fontSize: 11 },
+  bookBtn: {
+    backgroundColor:   '#7c6af7',
+    borderRadius:      8,
+    paddingHorizontal: 12,
+    paddingVertical:    5,
+    marginTop:         3,
+  },
+  bookBtnText: { color: '#fff', fontWeight: '800', fontSize: 12 },
+  providerEmpty: {
+    alignItems:   'center',
+    paddingVertical: 28,
+    gap:          8,
+  },
+  providerEmptyText: { color: '#bbb', fontSize: 13 },
 
   // ── Welcome strip ──────────────────────────────────────────────────
   welcomeStrip: {

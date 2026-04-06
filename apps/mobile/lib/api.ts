@@ -55,6 +55,22 @@ export const PaymentAPI = {
     _post<PaymentIntent>(`${PAYMENT}/v1/payments/intent`, p),
 }
 
+// ─── Location API (public — no token required) ────────────────────────────────
+export const LocationAPI = {
+  cities: () =>
+    _get<{ cities: City[] }>(`${CORE}/v1/locations/cities`),
+  areas: (cityId: string) =>
+    _get<{ areas: Area[] }>(`${CORE}/v1/locations/cities/${encodeURIComponent(cityId)}/areas`),
+}
+
+// ─── Providers API (public — no token required) ───────────────────────────────
+export const ProvidersAPI = {
+  list: (cityId: string, category: string) =>
+    _get<{ providers: Provider[] }>(
+      `${CORE}/v1/providers?cityId=${encodeURIComponent(cityId)}&category=${encodeURIComponent(category)}`
+    ),
+}
+
 // ─── AI API ───────────────────────────────────────────────────────────────────
 export const AIAPI = {
   recommendations: (userId: string, context = 'home', limit = 10) =>
@@ -122,6 +138,31 @@ export interface PaymentIntent {
   status:            string
   amount_cents:      number
   currency:          string
+}
+
+export interface City {
+  id:       string
+  name:     string
+  state:    string
+  is_rural: boolean
+}
+
+export interface Area {
+  id:       string
+  city_id:  string
+  name:     string
+  pincode:  string | null
+}
+
+export interface Provider {
+  id:            string
+  name:          string
+  address:       string | null
+  area_name:     string | null
+  service_id:    string
+  service_title: string
+  price_paise:   number
+  duration_mins: number
 }
 
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────

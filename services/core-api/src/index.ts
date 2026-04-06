@@ -6,6 +6,8 @@ import { Pool } from 'pg'
 import { getFirebaseAdmin } from './firebase-admin'
 import { authRoutes, publicAuthRoutes } from './routes/auth'
 import { userRoutes } from './routes/users'
+import { locationRoutes } from './routes/locations'
+import { providerRoutes } from './routes/providers'
 
 // ── Startup env validation ───────────────────────────────────────────────────
 const REQUIRED_ENV = ['DATABASE_URL', 'REDIS_URL'] as const
@@ -60,6 +62,8 @@ app.register(fastifyRedis, {
 app.register(publicAuthRoutes, { prefix: '/v1/auth' })
 app.register(authRoutes, { prefix: '/v1/auth' })
 app.register(userRoutes, { prefix: '/v1/users' })
+app.register(locationRoutes, { prefix: '/v1/locations' })
+app.register(providerRoutes, { prefix: '/v1/providers' })
 
 app.get('/health', async () => ({
   status: 'ok',

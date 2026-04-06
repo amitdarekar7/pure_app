@@ -5,6 +5,12 @@
     "version": "1.0.0",
     "scheme": "pureapp",
     "orientation": "default",
+    "icon": "./assets/images/logo_pure.jpeg",
+    "splash": {
+      "image": "./assets/images/logo_pure.jpeg",
+      "resizeMode": "contain",
+      "backgroundColor": "#f5f5f7"
+    },
     "platforms": ["ios", "android", "web"],
     "ios": {
       "bundleIdentifier": "com.pureapp.mobile",
@@ -13,12 +19,14 @@
     "android": {
       "package": "com.pureapp.mobile",
       "adaptiveIcon": {
-        "backgroundColor": "#1a1a2e"
+        "foregroundImage": "./assets/images/logo_pure.jpeg",
+        "backgroundColor": "#f5f5f7"
       }
     },
     "web": {
       "bundler": "metro",
-      "output": "static"
+      "output": "static",
+      "favicon": "./assets/images/logo_pure.jpeg"
     },
     "plugins": [
       "expo-router"
