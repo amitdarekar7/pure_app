@@ -53,19 +53,24 @@ export default function LoginScreen() {
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Brand */}
-        <View style={styles.brand}>
-          <Text style={styles.logo}>⚡ PureApp</Text>
-          <Text style={styles.tagline}>Welcome back</Text>
-        </View>
-
-        {/* Form */}
         <View style={styles.card}>
+
+          {/* Brand */}
+          <View style={styles.brand}>
+            <View style={styles.logoDiamond}>
+              <Text style={styles.logoDiamondText}>◆</Text>
+            </View>
+            <Text style={styles.logoWord}>PURE</Text>
+            <Text style={styles.logoTagline}>BEAUTY & WELLNESS</Text>
+            <Text style={styles.tagline}>Welcome back</Text>
+          </View>
+
+          {/* Fields */}
           <Text style={styles.label}>Email</Text>
           <TextInput
             style={styles.input}
             placeholder="you@example.com"
-            placeholderTextColor="#555"
+            placeholderTextColor="#bbb"
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
@@ -78,12 +83,26 @@ export default function LoginScreen() {
           <TextInput
             style={styles.input}
             placeholder="••••••••"
-            placeholderTextColor="#555"
+            placeholderTextColor="#bbb"
             value={password}
             onChangeText={setPassword}
             secureTextEntry
             autoComplete="password"
           />
+
+          {/* Recovery links */}
+          <View style={styles.recoveryRow}>
+            <Link href="/(auth)/forgot-password" asChild>
+              <Pressable>
+                <Text style={styles.recoveryLink}>Forgot Password?</Text>
+              </Pressable>
+            </Link>
+            <Link href="/(auth)/forgot-email" asChild>
+              <Pressable>
+                <Text style={styles.recoveryLink}>Forgot Email?</Text>
+              </Pressable>
+            </Link>
+          </View>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -96,16 +115,24 @@ export default function LoginScreen() {
               ? <ActivityIndicator color="#fff" />
               : <Text style={styles.btnText}>Log In</Text>}
           </Pressable>
-        </View>
 
-        {/* Footer */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>{"Don't have an account? "}</Text>
-          <Link href="/(auth)/register" asChild>
-            <Pressable>
-              <Text style={styles.link}>Register</Text>
-            </Pressable>
-          </Link>
+          {/* Divider */}
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          {/* Footer */}
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>{"Don't have an account? "}</Text>
+            <Link href="/(auth)/register" asChild>
+              <Pressable>
+                <Text style={styles.link}>Sign up</Text>
+              </Pressable>
+            </Link>
+          </View>
+
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -113,44 +140,69 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: '#0f0f23' },
-  scroll: { flexGrow: 1, justifyContent: 'center', padding: 24 },
-
-  brand:   { alignItems: 'center', marginBottom: 40 },
-  logo:    { fontSize: 32, fontWeight: '800', color: '#7c6af7', letterSpacing: 1 },
-  tagline: { fontSize: 15, color: '#888', marginTop: 6 },
+  root:   { flex: 1, backgroundColor: '#f5f5f7' },
+  scroll: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
 
   card: {
-    backgroundColor: '#1a1a2e',
+    width:            '100%',
+    maxWidth:         420,
+    backgroundColor:  '#ffffff',
+    borderRadius:     20,
+    padding:          28,
+    shadowColor:      '#000',
+    shadowOffset:     { width: 0, height: 4 },
+    shadowOpacity:    0.08,
+    shadowRadius:     16,
+    elevation:        6,
+  },
+
+  brand:         { alignItems: 'center', marginBottom: 28 },
+  logoDiamond: {
+    width:           52,
+    height:          52,
     borderRadius:    14,
-    padding:         24,
-    elevation:       6,
+    backgroundColor: '#0f0f23',
+    alignItems:      'center',
+    justifyContent:  'center',
+    marginBottom:    10,
   },
-  label: { color: '#aaa', fontSize: 13, fontWeight: '600', marginBottom: 6, marginTop: 4 },
+  logoDiamondText: { color: '#7c6af7', fontSize: 26 },
+  logoWord:    { color: '#0f0f23', fontSize: 26, fontWeight: '900', letterSpacing: 5 },
+  logoTagline: { color: '#7c6af7', fontSize: 9,  fontWeight: '700', letterSpacing: 3, marginTop: 2, marginBottom: 12 },
+  tagline:     { color: '#999',    fontSize: 14 },
+
+  label: { color: '#444', fontSize: 13, fontWeight: '700', marginBottom: 6, marginTop: 4 },
   input: {
-    backgroundColor:   '#0f0f23',
+    backgroundColor:   '#f8f8fc',
     borderWidth:       1,
-    borderColor:       '#2d2d4e',
-    borderRadius:      8,
+    borderColor:       '#ebebf5',
+    borderRadius:      10,
     paddingHorizontal: 14,
-    paddingVertical:   12,
-    color:             '#fff',
+    paddingVertical:   13,
+    color:             '#0f0f23',
     fontSize:          15,
-    marginBottom:      16,
+    marginBottom:      14,
   },
-  error: { color: '#ff6b6b', fontSize: 13, marginBottom: 12, textAlign: 'center' },
+  error: { color: '#e53935', fontSize: 13, marginBottom: 10, textAlign: 'center' },
+
+  recoveryRow:  { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 18, marginTop: -6 },
+  recoveryLink: { color: '#7c6af7', fontSize: 13, fontWeight: '600' },
 
   btn: {
-    backgroundColor: '#7c6af7',
-    borderRadius:    10,
-    paddingVertical: 14,
+    backgroundColor: '#0f0f23',
+    borderRadius:    12,
+    paddingVertical: 15,
     alignItems:      'center',
     marginTop:       4,
   },
-  btnDisabled: { opacity: 0.6 },
-  btnText:     { color: '#fff', fontWeight: '700', fontSize: 16 },
+  btnDisabled: { opacity: 0.5 },
+  btnText:     { color: '#fff', fontWeight: '800', fontSize: 15, letterSpacing: 0.5 },
 
-  footer:     { flexDirection: 'row', justifyContent: 'center', marginTop: 28 },
-  footerText: { color: '#666', fontSize: 14 },
-  link:       { color: '#7c6af7', fontSize: 14, fontWeight: '600' },
+  divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 20, gap: 10 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: '#ebebf5' },
+  dividerText: { color: '#bbb', fontSize: 12 },
+
+  footer:     { flexDirection: 'row', justifyContent: 'center' },
+  footerText: { color: '#999', fontSize: 14 },
+  link:       { color: '#7c6af7', fontSize: 14, fontWeight: '700' },
 })

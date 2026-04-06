@@ -30,9 +30,10 @@ export default function TabLayout() {
       <Tabs.Screen
         name="home"
         options={{
-          title:       'Home',
-          tabBarLabel: 'Home',
-          tabBarIcon:  ({ color }) => <TabIcon name="home-outline" color={color} />,
+          headerShown:    false,
+          tabBarStyle:    { display: 'none' },
+          tabBarLabel:    'Home',
+          tabBarIcon:     ({ color }) => <TabIcon name="home-outline" color={color} />,
         }}
       />
       <Tabs.Screen

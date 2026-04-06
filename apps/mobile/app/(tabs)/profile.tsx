@@ -144,7 +144,7 @@ export default function ProfileScreen() {
 
           <Field label="Display Name">
             {editing
-              ? <TextInput style={styles.fieldInput} value={name} onChangeText={setName} placeholderTextColor="#555" />
+              ? <TextInput style={styles.fieldInput} value={name} onChangeText={setName} placeholderTextColor="#bbb" />
               : <Text style={styles.fieldValue}>{user.display_name || '—'}</Text>}
           </Field>
 
@@ -156,20 +156,20 @@ export default function ProfileScreen() {
                   onChangeText={setBio}
                   multiline
                   numberOfLines={3}
-                  placeholderTextColor="#555"
+                  placeholderTextColor="#bbb"
                 />
               : <Text style={styles.fieldValue}>{user.bio || '—'}</Text>}
           </Field>
 
           <Field label="Locale">
             {editing
-              ? <TextInput style={styles.fieldInput} value={locale} onChangeText={setLocale} autoCapitalize="none" placeholderTextColor="#555" />
+              ? <TextInput style={styles.fieldInput} value={locale} onChangeText={setLocale} autoCapitalize="none" placeholderTextColor="#bbb" />
               : <Text style={styles.fieldValue}>{user.locale}</Text>}
           </Field>
 
           <Field label="Timezone">
             {editing
-              ? <TextInput style={styles.fieldInput} value={timezone} onChangeText={setTimezone} autoCapitalize="none" placeholder="e.g. Europe/London" placeholderTextColor="#555" />
+              ? <TextInput style={styles.fieldInput} value={timezone} onChangeText={setTimezone} autoCapitalize="none" placeholder="e.g. Asia/Kolkata" placeholderTextColor="#bbb" />
               : <Text style={styles.fieldValue}>{user.timezone || '—'}</Text>}
           </Field>
 
@@ -233,51 +233,60 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 const styles = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: '#0f0f23' },
-  scroll: { padding: 16, paddingBottom: 40 },
+  root:   { flex: 1, backgroundColor: '#f5f5f7' },
+  scroll: { padding: 16, paddingBottom: 40, alignItems: 'center' },
 
   headerCard: {
-    backgroundColor: '#1a1a2e',
-    borderRadius:    16,
-    padding:         24,
-    alignItems:      'center',
-    marginBottom:    20,
+    width:           '100%',
+    maxWidth:         520,
+    backgroundColor: '#ffffff',
+    borderRadius:     20,
+    padding:          28,
+    alignItems:       'center',
+    marginBottom:     16,
+    shadowColor:      '#000',
+    shadowOffset:     { width: 0, height: 4 },
+    shadowOpacity:    0.08,
+    shadowRadius:     16,
+    elevation:        6,
   },
-  avatar:      { width: 72, height: 72, borderRadius: 36, backgroundColor: '#7c6af7', justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
-  avatarText:  { color: '#fff', fontSize: 24, fontWeight: '800' },
-  displayName: { color: '#fff', fontSize: 20, fontWeight: '700' },
-  email:       { color: '#888', fontSize: 14, marginTop: 4 },
-  statusBadge: { backgroundColor: '#2d2d4e', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4, marginTop: 10 },
-  statusActive:{ backgroundColor: '#0f2a1a' },
-  statusText:  { color: '#51cf66', fontSize: 12, fontWeight: '600' },
+  avatar:      { width: 76, height: 76, borderRadius: 38, backgroundColor: '#0f0f23', justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
+  avatarText:  { color: '#7c6af7', fontSize: 26, fontWeight: '900' },
+  displayName: { color: '#0f0f23', fontSize: 20, fontWeight: '800' },
+  email:       { color: '#888',    fontSize: 14, marginTop: 4 },
+  statusBadge: { backgroundColor: '#f0f0f8', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4, marginTop: 10 },
+  statusActive:{ backgroundColor: '#e8f5e9' },
+  statusText:  { color: '#2e7d32', fontSize: 12, fontWeight: '700' },
 
-  successBox:  { backgroundColor: '#0f2a1a', borderRadius: 10, padding: 12, alignItems: 'center', marginBottom: 12 },
-  successText: { color: '#51cf66', fontWeight: '600' },
+  successBox:  { width: '100%', maxWidth: 520, backgroundColor: '#e8f5e9', borderRadius: 10, padding: 12, alignItems: 'center', marginBottom: 12 },
+  successText: { color: '#2e7d32', fontWeight: '700' },
 
-  section:       { backgroundColor: '#1a1a2e', borderRadius: 14, overflow: 'hidden', marginBottom: 16 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#2d2d4e' },
-  sectionTitle:  { color: '#fff', fontSize: 15, fontWeight: '700' },
-  editBtn:       { backgroundColor: '#2d2d4e', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
+  section:       { width: '100%', maxWidth: 520, backgroundColor: '#ffffff', borderRadius: 20, overflow: 'hidden', marginBottom: 16,
+                   shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 3 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f8' },
+  sectionTitle:  { color: '#0f0f23', fontSize: 15, fontWeight: '800' },
+  editBtn:       { backgroundColor: '#f0f0f8', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
   editBtnText:   { color: '#7c6af7', fontSize: 13, fontWeight: '700' },
 
-  field:       { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2d2d4e' },
-  fieldLabel:  { color: '#666', fontSize: 12, fontWeight: '600', marginBottom: 4 },
-  fieldValue:  { color: '#fff', fontSize: 15 },
-  fieldInput:  { color: '#fff', fontSize: 15, backgroundColor: '#0f0f23', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: '#2d2d4e' },
-  textArea:    { height: 72, textAlignVertical: 'top' },
+  field:       { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f8' },
+  fieldLabel:  { color: '#aaa', fontSize: 12, fontWeight: '700', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
+  fieldValue:  { color: '#0f0f23', fontSize: 15 },
+  fieldInput:  { color: '#0f0f23', fontSize: 15, backgroundColor: '#f8f8fc', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: '#ebebf5' },
+  textArea:    { height: 80, textAlignVertical: 'top' },
 
-  error: { color: '#ff6b6b', textAlign: 'center', marginBottom: 12, fontSize: 13 },
+  error: { color: '#e53935', textAlign: 'center', marginBottom: 12, fontSize: 13, width: '100%', maxWidth: 520 },
 
-  editActions: { flexDirection: 'row', gap: 10, marginBottom: 16 },
-  cancelBtn:   { flex: 1, backgroundColor: '#2d2d4e', borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
-  cancelBtnText:{ color: '#aaa', fontWeight: '700' },
-  saveBtn:     { flex: 2, backgroundColor: '#7c6af7', borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
-  saveBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  editActions:  { flexDirection: 'row', gap: 10, marginBottom: 16, width: '100%', maxWidth: 520 },
+  cancelBtn:    { flex: 1, backgroundColor: '#f0f0f8', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  cancelBtnText:{ color: '#666', fontWeight: '700' },
+  saveBtn:      { flex: 2, backgroundColor: '#0f0f23', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  saveBtnText:  { color: '#fff', fontWeight: '800', fontSize: 15 },
 
-  logoutBtn:      { borderWidth: 1, borderColor: '#ff6b6b', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
-  logoutBtnText:  { color: '#ff6b6b', fontWeight: '700', fontSize: 15 },
+  logoutBtn:      { width: '100%', maxWidth: 520, borderWidth: 1.5, borderColor: '#ffcdd2', borderRadius: 14, paddingVertical: 15, alignItems: 'center', backgroundColor: '#fff5f5' },
+  logoutBtnText:  { color: '#e53935', fontWeight: '700', fontSize: 15 },
 
-  confirmBox:     { backgroundColor: '#1a1a2e', borderRadius: 14, padding: 20, marginTop: 8 },
-  confirmText:    { color: '#fff', fontSize: 15, textAlign: 'center', marginBottom: 16 },
+  confirmBox:     { width: '100%', maxWidth: 520, backgroundColor: '#ffffff', borderRadius: 16, padding: 20, marginTop: 8,
+                    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 3 },
+  confirmText:    { color: '#0f0f23', fontSize: 15, textAlign: 'center', marginBottom: 16 },
   confirmActions: { flexDirection: 'row', gap: 10 },
 })

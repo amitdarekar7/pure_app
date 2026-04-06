@@ -4,7 +4,7 @@ import fastifyCors from '@fastify/cors'
 import fastifyRedis from '@fastify/redis'
 import { Pool } from 'pg'
 import { getFirebaseAdmin } from './firebase-admin'
-import { authRoutes } from './routes/auth'
+import { authRoutes, publicAuthRoutes } from './routes/auth'
 import { userRoutes } from './routes/users'
 
 // ── Startup env validation ───────────────────────────────────────────────────
@@ -57,6 +57,7 @@ app.register(fastifyRedis, {
 })
 
 // ── Routes ───────────────────────────────────────────────────────────────────
+app.register(publicAuthRoutes, { prefix: '/v1/auth' })
 app.register(authRoutes, { prefix: '/v1/auth' })
 app.register(userRoutes, { prefix: '/v1/users' })
 

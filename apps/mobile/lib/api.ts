@@ -30,6 +30,13 @@ export const AuthAPI = {
     _auth<{ userId: string }>('POST', `${CORE}/v1/auth/sync`, p),
 }
 
+// ─── Public Auth API (no token required) ──────────────────────────────────────
+export const PublicAuthAPI = {
+  // Look up masked email by phone number — for "Forgot Email" flow
+  lookupEmail: (phone: string) =>
+    _post<{ maskedEmail: string }>(`${CORE}/v1/auth/lookup-email`, { phone }),
+}
+
 // ─── Users API (authenticated) ────────────────────────────────────────────────
 export const UsersAPI = {
   me:       ()                              => _auth<User>('GET',   `${CORE}/v1/users/me`),

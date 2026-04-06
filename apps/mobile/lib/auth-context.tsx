@@ -4,10 +4,25 @@ import {
   createUserWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
+  type User as FirebaseUser,
 } from 'firebase/auth'
 import { firebaseAuth } from './firebase'
 import { AuthAPI, UsersAPI } from './api'
 import type { User } from './api'
+
+/** Build a minimal User from Firebase auth data (used when backend is unreachable) */
+function userFromFirebase(fbUser: FirebaseUser): User {
+  return {
+    id:           fbUser.uid,
+    email:        fbUser.email ?? '',
+    display_name: fbUser.displayName ?? null,
+    bio:          null,
+    locale:       'en-US',
+    timezone:     null,
+    status:       'active',
+    created_at:   new Date().toISOString(),
+  }
+}
 
 interface AuthCtx {
   user:        User | null
@@ -29,11 +44,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (fbUser) => {
       if (fbUser) {
+        // Set from Firebase data immediately so the UI updates without waiting for backend
+        setUser(userFromFirebase(fbUser))
         try {
+          // Then upgrade with full profile from our backend (display_name, bio, etc.)
           const me = await UsersAPI.me()
           setUser(me)
         } catch {
-          setUser(null)
+          // Backend unreachable — keep the Firebase-derived user so the header still shows
         }
       } else {
         setUser(null)
@@ -44,16 +62,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   async function login(email: string, password: string) {
-    await signInWithEmailAndPassword(firebaseAuth, email, password)
-    // onAuthStateChanged fires and fetches the profile automatically
+    const cred = await signInWithEmailAndPassword(firebaseAuth, email, password)
+    // Set user synchronously so the home screen renders with the name immediately
+    // onAuthStateChanged will fire shortly after and upgrade it with backend data
+    setUser(userFromFirebase(cred.user))
   }
 
   async function register(email: string, password: string, displayName: string) {
-    await createUserWithEmailAndPassword(firebaseAuth, email, password)
-    // Provision our DB record with display name (idempotent upsert)
-    await AuthAPI.sync({ displayName })
-    const me = await UsersAPI.me()
-    setUser(me)
+    const cred = await createUserWithEmailAndPassword(firebaseAuth, email, password)
+    // Show the user immediately from Firebase data
+    setUser(userFromFirebase(cred.user))
+    try {
+      // Provision our DB record with display name, then fetch the full profile
+      await AuthAPI.sync({ displayName })
+      const me = await UsersAPI.me()
+      setUser(me)
+    } catch {
+      // Backend unreachable — Firebase user is still set above
+    }
   }
 
   async function logout() {
