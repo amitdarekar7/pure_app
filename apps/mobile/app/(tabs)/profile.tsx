@@ -114,6 +114,12 @@ export default function ProfileScreen() {
     >
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="always">
 
+        {/* Back to Home */}
+        <Pressable style={styles.backBar} onPress={() => router.replace('/(tabs)/home')}>
+          <Text style={styles.backArrow}>‹</Text>
+          <Text style={styles.backLabel}>Back to Home</Text>
+        </Pressable>
+
         {/* Header */}
         <View style={styles.headerCard}>
           <Avatar name={user.display_name} />
@@ -235,6 +241,21 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 const styles = StyleSheet.create({
   root:   { flex: 1, backgroundColor: '#f5f5f7' },
   scroll: { padding: 16, paddingBottom: 40, alignItems: 'center' },
+
+  backBar: {
+    flexDirection:   'row',
+    alignItems:      'center',
+    gap:             6,
+    alignSelf:       'flex-start',
+    backgroundColor: '#f0f0f8',
+    borderRadius:    22,
+    paddingVertical:  9,
+    paddingLeft:     10,
+    paddingRight:    16,
+    marginBottom:    14,
+  },
+  backArrow: { color: '#7c6af7', fontSize: 22, lineHeight: 22, fontWeight: '700', marginTop: -2 },
+  backLabel: { color: '#7c6af7', fontSize: 14, fontWeight: '700' },
 
   headerCard: {
     width:           '100%',
