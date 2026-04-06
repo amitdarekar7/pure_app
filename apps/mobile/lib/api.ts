@@ -1,11 +1,10 @@
 /**
  * Centralised API client.
  * - Typed wrappers for every backend endpoint
- * - Automatic token refresh on 401
- * - AsyncStorage-backed token persistence
+ * - Firebase ID tokens for authentication (auto-refreshed by Firebase SDK)
  */
-import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Platform } from 'react-native'
+import { firebaseAuth } from './firebase'
 
 /**
  * On Android emulators, `localhost` resolves to the emulator itself — not the
@@ -24,30 +23,11 @@ const SEARCH  = localUrl(process.env.EXPO_PUBLIC_SEARCH_URL, 3001)
 const PAYMENT = localUrl(process.env.EXPO_PUBLIC_PAY_URL,    3002)
 const AI      = localUrl(process.env.EXPO_PUBLIC_AI_URL,     3003)
 
-// ─── Token storage ────────────────────────────────────────────────────────────
-export const TokenStore = {
-  getAccess:  ()                       => AsyncStorage.getItem('access_token'),
-  getRefresh: ()                       => AsyncStorage.getItem('refresh_token'),
-  setTokens:  (a: string, r: string)   =>
-    AsyncStorage.multiSet([['access_token', a], ['refresh_token', r]]),
-  setAccess:  (a: string)              => AsyncStorage.setItem('access_token', a),
-  clear:      ()                       => AsyncStorage.multiRemove(['access_token', 'refresh_token']),
-}
-
 // ─── Auth API ─────────────────────────────────────────────────────────────────
 export const AuthAPI = {
-  register: (email: string, password: string, displayName: string) =>
-    _post<{ accessToken: string; refreshToken: string; userId: string }>(
-      `${CORE}/v1/auth/register`, { email, password, displayName },
-    ),
-  login: (email: string, password: string) =>
-    _post<{ accessToken: string; refreshToken: string }>(
-      `${CORE}/v1/auth/login`, { email, password },
-    ),
-  refresh: (refreshToken: string) =>
-    _post<{ accessToken: string }>(`${CORE}/v1/auth/refresh`, { refreshToken }),
-  logout: (refreshToken: string) =>
-    _post<void>(`${CORE}/v1/auth/logout`, { refreshToken }),
+  // Called after Firebase registration to provision the user record in our DB
+  sync: (p: { displayName?: string }) =>
+    _auth<{ userId: string }>('POST', `${CORE}/v1/auth/sync`, p),
 }
 
 // ─── Users API (authenticated) ────────────────────────────────────────────────
@@ -138,6 +118,12 @@ export interface PaymentIntent {
 }
 
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────
+async function getIdToken(forceRefresh = false): Promise<string> {
+  const user = firebaseAuth.currentUser
+  if (!user) throw Object.assign(new Error('Not authenticated'), { status: 401 })
+  return user.getIdToken(forceRefresh)
+}
+
 function makeHeaders(token?: string | null): Record<string, string> {
   const h: Record<string, string> = { 'Content-Type': 'application/json' }
   if (token) h['Authorization'] = `Bearer ${token}`
@@ -161,28 +147,20 @@ async function _post<T>(url: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>
 }
 
-/** Authenticated fetch + auto-refresh on 401 */
+/** Authenticated fetch. Firebase auto-manages token refresh; force-refresh on 401. */
 async function _auth<T>(method: string, url: string, body?: unknown): Promise<T> {
-  const doFetch = (token: string | null) =>
+  const doFetch = (token: string) =>
     fetch(url, {
       method,
       headers: makeHeaders(token),
       body:    body != null ? JSON.stringify(body) : undefined,
     })
 
-  let res = await doFetch(await TokenStore.getAccess())
+  let res = await doFetch(await getIdToken())
 
   if (res.status === 401) {
-    const rt = await TokenStore.getRefresh()
-    if (!rt) throw Object.assign(new Error('Not authenticated'), { status: 401 })
-    try {
-      const { accessToken } = await AuthAPI.refresh(rt)
-      await TokenStore.setAccess(accessToken)
-      res = await doFetch(accessToken)
-    } catch {
-      await TokenStore.clear()
-      throw Object.assign(new Error('Session expired. Please log in again.'), { status: 401 })
-    }
+    // Token may have just expired; force a refresh and retry once
+    res = await doFetch(await getIdToken(true))
   }
 
   if (!res.ok) throw await _apiError(res)

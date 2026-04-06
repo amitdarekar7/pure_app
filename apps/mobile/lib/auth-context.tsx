@@ -1,5 +1,12 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
-import { AuthAPI, TokenStore, UsersAPI } from './api'
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+} from 'firebase/auth'
+import { firebaseAuth } from './firebase'
+import { AuthAPI, UsersAPI } from './api'
 import type { User } from './api'
 
 interface AuthCtx {
@@ -18,45 +25,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user,      setUser]      = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Restore session from stored tokens on app launch
+  // Subscribe to Firebase auth state — handles session restore on app launch
   useEffect(() => {
-    ;(async () => {
-      try {
-        const token = await TokenStore.getAccess()
-        if (token) {
+    const unsubscribe = onAuthStateChanged(firebaseAuth, async (fbUser) => {
+      if (fbUser) {
+        try {
           const me = await UsersAPI.me()
           setUser(me)
+        } catch {
+          setUser(null)
         }
-      } catch {
-        await TokenStore.clear()
-      } finally {
-        setIsLoading(false)
+      } else {
+        setUser(null)
       }
-    })()
+      setIsLoading(false)
+    })
+    return unsubscribe
   }, [])
 
   async function login(email: string, password: string) {
-    const res = await AuthAPI.login(email, password)
-    await TokenStore.setTokens(res.accessToken, res.refreshToken)
-    const me = await UsersAPI.me()
-    setUser(me)
+    await signInWithEmailAndPassword(firebaseAuth, email, password)
+    // onAuthStateChanged fires and fetches the profile automatically
   }
 
   async function register(email: string, password: string, displayName: string) {
-    const res = await AuthAPI.register(email, password, displayName)
-    await TokenStore.setTokens(res.accessToken, res.refreshToken)
+    await createUserWithEmailAndPassword(firebaseAuth, email, password)
+    // Provision our DB record with display name (idempotent upsert)
+    await AuthAPI.sync({ displayName })
     const me = await UsersAPI.me()
     setUser(me)
   }
 
   async function logout() {
-    try {
-      const rt = await TokenStore.getRefresh()
-      if (rt) await AuthAPI.logout(rt)
-    } finally {
-      await TokenStore.clear()
-      setUser(null)
-    }
+    await signOut(firebaseAuth)
+    setUser(null)
   }
 
   async function refreshUser() {

@@ -1,19 +1,27 @@
 import 'dotenv/config'
 import Fastify from 'fastify'
 import fastifyCors from '@fastify/cors'
-import fastifyJwt from '@fastify/jwt'
 import fastifyRedis from '@fastify/redis'
 import { Pool } from 'pg'
+import { getFirebaseAdmin } from './firebase-admin'
 import { authRoutes } from './routes/auth'
 import { userRoutes } from './routes/users'
 
 // ── Startup env validation ───────────────────────────────────────────────────
-const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET', 'REDIS_URL'] as const
+const REQUIRED_ENV = ['DATABASE_URL', 'REDIS_URL'] as const
 for (const key of REQUIRED_ENV) {
   if (!process.env[key]) {
     console.error(`[startup] Required environment variable "${key}" is not set. Exiting.`)
     process.exit(1)
   }
+}
+
+// Validate Firebase Admin config early so misconfiguration fails at startup
+try {
+  getFirebaseAdmin()
+} catch (err) {
+  console.error('[startup] Firebase Admin init failed:', (err as Error).message)
+  process.exit(1)
 }
 
 // Augment FastifyInstance with the `db` decorator
@@ -38,14 +46,10 @@ app.decorate('db', pool)
 
 // ── Plugins ─────────────────────────────────────────────────────────────────
 app.register(fastifyCors, {
-  origin: true,          // echo back the request origin (dev-friendly)
+  origin: true,
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
-})
-
-app.register(fastifyJwt, {
-  secret: process.env.JWT_SECRET!,
 })
 
 app.register(fastifyRedis, {

@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify'
+import { requireAuth } from '../middleware/auth'
 
 interface UpdateProfileBody {
   displayName?: string
@@ -9,18 +10,20 @@ interface UpdateProfileBody {
 }
 
 export async function userRoutes(app: FastifyInstance) {
-  // All routes in this plugin require a valid JWT
-  app.addHook('onRequest', async (req, reply) => {
-    try {
-      await req.jwtVerify()
-    } catch {
-      return reply.status(401).send({ error: 'Unauthorized' })
-    }
-  })
+  app.addHook('onRequest', requireAuth)
 
   // ── GET /v1/users/me ──────────────────────────────────────────────────────
   app.get('/me', async (req, reply) => {
-    const { sub } = req.user as { sub: string }
+    const uid   = req.firebaseUid
+    const email = req.firebaseEmail
+
+    // Auto-provision the DB record on first access (idempotent)
+    await app.db.query(
+      `INSERT INTO users (firebase_uid, email)
+       VALUES ($1, $2)
+       ON CONFLICT (firebase_uid) DO UPDATE SET email = EXCLUDED.email, updated_at = NOW()`,
+      [uid, email],
+    )
 
     const result = await app.db.query(
       `SELECT
@@ -28,8 +31,8 @@ export async function userRoutes(app: FastifyInstance) {
          p.display_name, p.avatar_url, p.bio, p.locale, p.timezone
        FROM users u
        LEFT JOIN profiles p ON p.user_id = u.id
-       WHERE u.id = $1`,
-      [sub],
+       WHERE u.firebase_uid = $1`,
+      [uid],
     )
 
     if (!result.rows[0]) {
@@ -41,8 +44,19 @@ export async function userRoutes(app: FastifyInstance) {
 
   // ── PATCH /v1/users/me ────────────────────────────────────────────────────
   app.patch<{ Body: UpdateProfileBody }>('/me', async (req, reply) => {
-    const { sub } = req.user as { sub: string }
+    const uid = req.firebaseUid
     const { displayName, avatarUrl, bio, locale, timezone } = req.body
+
+    const userResult = await app.db.query(
+      `SELECT id FROM users WHERE firebase_uid = $1`,
+      [uid],
+    )
+
+    if (!userResult.rows[0]) {
+      return reply.status(404).send({ error: 'User not found' })
+    }
+
+    const userId: string = userResult.rows[0].id
 
     await app.db.query(
       `INSERT INTO profiles (user_id, display_name, avatar_url, bio, locale, timezone)
@@ -54,7 +68,7 @@ export async function userRoutes(app: FastifyInstance) {
          locale       = COALESCE(EXCLUDED.locale,       profiles.locale),
          timezone     = COALESCE(EXCLUDED.timezone,     profiles.timezone),
          updated_at   = NOW()`,
-      [sub, displayName ?? null, avatarUrl ?? null, bio ?? null, locale ?? 'en-US', timezone ?? 'UTC'],
+      [userId, displayName ?? null, avatarUrl ?? null, bio ?? null, locale ?? 'en-US', timezone ?? 'UTC'],
     )
 
     return reply.status(204).send()
@@ -62,14 +76,15 @@ export async function userRoutes(app: FastifyInstance) {
 
   // ── GET /v1/users/me/devices ──────────────────────────────────────────────
   app.get('/me/devices', async (req) => {
-    const { sub } = req.user as { sub: string }
+    const uid = req.firebaseUid
 
     const result = await app.db.query(
-      `SELECT id, platform, device_model, last_seen_at, created_at
-       FROM devices
-       WHERE user_id = $1
-       ORDER BY last_seen_at DESC`,
-      [sub],
+      `SELECT d.id, d.platform, d.device_model, d.last_seen_at, d.created_at
+       FROM devices d
+       JOIN users u ON u.id = d.user_id
+       WHERE u.firebase_uid = $1
+       ORDER BY d.last_seen_at DESC`,
+      [uid],
     )
 
     return { devices: result.rows }
