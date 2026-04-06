@@ -1,0 +1,44 @@
+# Node
+node_modules/
+dist/
+.env
+.env.local
+*.env
+
+# Rust
+target/
+Cargo.lock
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Go
+vendor/
+
+# macOS
+.DS_Store
+
+# Docker volumes
+data/
+postgres_data/
+
+# AI models (large binary files)
+services/ai-service/models/
+
+# IDE
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+
+# Expo
+apps/mobile/.expo/
+apps/mobile/android/
+apps/mobile/ios/
+web-build/

@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "PureApp",
+    "slug": "pure-app",
+    "version": "1.0.0",
+    "scheme": "pureapp",
+    "orientation": "default",
+    "platforms": ["ios", "android", "web"],
+    "ios": {
+      "bundleIdentifier": "com.pureapp.mobile",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.pureapp.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#1a1a2e"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

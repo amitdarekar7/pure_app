@@ -1,0 +1,41 @@
+{
+  "mappings": {
+    "properties": {
+      "id":           { "type": "keyword" },
+      "title": {
+        "type": "text",
+        "analyzer": "english",
+        "fields": { "keyword": { "type": "keyword" } }
+      },
+      "description":  { "type": "text", "analyzer": "english" },
+      "tags": {
+        "type": "text",
+        "fields": { "keyword": { "type": "keyword" } }
+      },
+      "category":     { "type": "keyword" },
+      "price_cents":  { "type": "long" },
+      "currency":     { "type": "keyword" },
+      "rating":       { "type": "float" },
+      "review_count": { "type": "integer" },
+      "seller_id":    { "type": "keyword" },
+      "in_stock":     { "type": "boolean" },
+      "location":     { "type": "geo_point" },
+      "image_url":    { "type": "keyword", "index": false },
+      "created_at":   { "type": "date" },
+      "updated_at":   { "type": "date" }
+    }
+  },
+  "settings": {
+    "number_of_shards":   3,
+    "number_of_replicas": 1,
+    "analysis": {
+      "analyzer": {
+        "search_analyzer": {
+          "type":      "custom",
+          "tokenizer": "standard",
+          "filter":    ["lowercase", "asciifolding", "stop", "snowball"]
+        }
+      }
+    }
+  }
+}

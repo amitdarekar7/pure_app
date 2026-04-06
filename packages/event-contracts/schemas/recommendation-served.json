@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://pure-app.io/events/recommendation-served/v1",
+  "title": "RecommendationServed",
+  "description": "Emitted by ai-service each time a recommendation response is returned. Consumers: analytics pipeline (impression tracking, CTR measurement).",
+  "type": "object",
+  "required": ["event_id", "event_type", "schema_version", "timestamp", "aggregate_id", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "event_id":       { "type": "string", "format": "uuid" },
+    "event_type":     { "type": "string", "const": "recommendation.served" },
+    "schema_version": { "type": "string", "const": "1.0.0" },
+    "timestamp":      { "type": "string", "format": "date-time" },
+    "aggregate_id":   { "type": "string", "format": "uuid", "description": "user_id" },
+    "data": {
+      "type": "object",
+      "required": ["user_id", "context", "item_ids", "model_version"],
+      "additionalProperties": false,
+      "properties": {
+        "user_id":       { "type": "string", "format": "uuid" },
+        "context":       { "type": "string", "enum": ["home", "pdp", "cart", "search", "tv_home"] },
+        "item_ids":      { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "model_version": { "type": "string" },
+        "latency_ms":    { "type": "integer", "minimum": 0 },
+        "cached":        { "type": "boolean" }
+      }
+    }
+  }
+}

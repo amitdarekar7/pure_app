@@ -1,0 +1,6 @@
+{
+  "name": "@pure-app/event-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Canonical JSON Schema event contracts for all Kafka domain events. All services validate against these schemas."
+}

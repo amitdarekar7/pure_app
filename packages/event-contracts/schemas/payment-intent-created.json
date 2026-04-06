@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://pure-app.io/events/payment-intent-created/v1",
+  "title": "PaymentIntentCreated",
+  "description": "Emitted by payment-service when a payment intent is created and pending processing. Consumers: core-api (update order status).",
+  "type": "object",
+  "required": ["event_id", "event_type", "schema_version", "timestamp", "aggregate_id", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "event_id":       { "type": "string", "format": "uuid" },
+    "event_type":     { "type": "string", "const": "payment.intent.created" },
+    "schema_version": { "type": "string", "const": "1.0.0" },
+    "timestamp":      { "type": "string", "format": "date-time" },
+    "aggregate_id":   { "type": "string", "format": "uuid", "description": "payment_intent_id" },
+    "data": {
+      "type": "object",
+      "required": ["payment_intent_id", "user_id", "amount_cents", "currency", "idempotency_key"],
+      "additionalProperties": false,
+      "properties": {
+        "payment_intent_id": { "type": "string", "format": "uuid" },
+        "user_id":           { "type": "string", "format": "uuid" },
+        "amount_cents":      { "type": "integer", "minimum": 1 },
+        "currency":          { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "idempotency_key":   { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

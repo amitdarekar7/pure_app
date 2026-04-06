@@ -1,0 +1,71 @@
+import 'dotenv/config'
+import Fastify from 'fastify'
+import fastifyCors from '@fastify/cors'
+import fastifyJwt from '@fastify/jwt'
+import fastifyRedis from '@fastify/redis'
+import { Pool } from 'pg'
+import { authRoutes } from './routes/auth'
+import { userRoutes } from './routes/users'
+
+// ── Startup env validation ───────────────────────────────────────────────────
+const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET', 'REDIS_URL'] as const
+for (const key of REQUIRED_ENV) {
+  if (!process.env[key]) {
+    console.error(`[startup] Required environment variable "${key}" is not set. Exiting.`)
+    process.exit(1)
+  }
+}
+
+// Augment FastifyInstance with the `db` decorator
+declare module 'fastify' {
+  interface FastifyInstance {
+    db: Pool
+  }
+}
+
+const app = Fastify({
+  logger: {
+    transport:
+      process.env.NODE_ENV === 'development'
+        ? { target: 'pino-pretty' }
+        : undefined,
+  },
+})
+
+// ── Database ────────────────────────────────────────────────────────────────
+const pool = new Pool({ connectionString: process.env.DATABASE_URL })
+app.decorate('db', pool)
+
+// ── Plugins ─────────────────────────────────────────────────────────────────
+app.register(fastifyCors, {
+  origin: true,          // echo back the request origin (dev-friendly)
+  methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+})
+
+app.register(fastifyJwt, {
+  secret: process.env.JWT_SECRET!,
+})
+
+app.register(fastifyRedis, {
+  url: process.env.REDIS_URL!,
+})
+
+// ── Routes ───────────────────────────────────────────────────────────────────
+app.register(authRoutes, { prefix: '/v1/auth' })
+app.register(userRoutes, { prefix: '/v1/users' })
+
+app.get('/health', async () => ({
+  status: 'ok',
+  ts: new Date().toISOString(),
+}))
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+const port = parseInt(process.env.PORT ?? '3000', 10)
+app.listen({ port, host: '0.0.0.0' }, (err) => {
+  if (err) {
+    app.log.error(err)
+    process.exit(1)
+  }
+})

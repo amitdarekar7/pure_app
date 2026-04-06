@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://pure-app.io/events/search-query-logged/v1",
+  "title": "SearchQueryLogged",
+  "description": "Emitted by search-service on every search request. Consumers: ai-service (query signals for reranking model training).",
+  "type": "object",
+  "required": ["event_id", "event_type", "schema_version", "timestamp", "aggregate_id", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "event_id":       { "type": "string", "format": "uuid" },
+    "event_type":     { "type": "string", "const": "search.query.logged" },
+    "schema_version": { "type": "string", "const": "1.0.0" },
+    "timestamp":      { "type": "string", "format": "date-time" },
+    "aggregate_id":   { "type": "string", "format": "uuid", "description": "session_id" },
+    "data": {
+      "type": "object",
+      "required": ["session_id", "query", "result_count", "latency_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "session_id":   { "type": "string", "format": "uuid" },
+        "user_id":      { "type": "string", "format": "uuid", "description": "null for anonymous" },
+        "query":        { "type": "string", "maxLength": 500 },
+        "filters":      { "type": "object" },
+        "result_count": { "type": "integer", "minimum": 0 },
+        "latency_ms":   { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}
