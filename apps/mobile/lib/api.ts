@@ -54,7 +54,6 @@ export const PaymentAPI = {
   createIntent: (p: CreateIntentPayload) =>
     _post<PaymentIntent>(`${PAYMENT}/v1/payments/intent`, p),
 }
-
 // ─── Location API (public — no token required) ────────────────────────────────
 export const LocationAPI = {
   cities: () =>
@@ -63,12 +62,28 @@ export const LocationAPI = {
     _get<{ areas: Area[] }>(`${CORE}/v1/locations/cities/${encodeURIComponent(cityId)}/areas`),
 }
 
-// ─── Providers API (public — no token required) ───────────────────────────────
+// ─── Providers API ────────────────────────────────────────────────────────────
 export const ProvidersAPI = {
   list: (cityId: string, category: string) =>
-    _get<{ providers: Provider[] }>(
-      `${CORE}/v1/providers?cityId=${encodeURIComponent(cityId)}&category=${encodeURIComponent(category)}`
+    _authOrGet<{ providers: Provider[] }>(
+      `${CORE}/v1/providers?cityId=${encodeURIComponent(cityId)}&category=${encodeURIComponent(category)}`,
     ),
+  get: (id: string, serviceId?: string) =>
+    _authOrGet<{ provider: ProviderDetail }>(
+      `${CORE}/v1/providers/${encodeURIComponent(id)}${serviceId ? `?serviceId=${encodeURIComponent(serviceId)}` : ''}`,
+    ),
+  like: (id: string) =>
+    _auth<{ likes_count: number }>('POST', `${CORE}/v1/providers/${encodeURIComponent(id)}/like`, {}),
+  unlike: (id: string) =>
+    _auth<{ likes_count: number }>('POST', `${CORE}/v1/providers/${encodeURIComponent(id)}/unlike`, {}),
+}
+
+// ─── Bookings API ─────────────────────────────────────────────────────────────
+export const BookingsAPI = {
+  create: (p: { providerServiceId: string; scheduledAt: string; notes?: string }) =>
+    _auth<{ booking: Booking }>('POST', `${CORE}/v1/bookings`, p),
+  my: () =>
+    _auth<{ bookings: BookingSummary[] }>('GET', `${CORE}/v1/bookings/my`),
 }
 
 // ─── AI API ───────────────────────────────────────────────────────────────────
@@ -163,6 +178,29 @@ export interface Provider {
   service_title: string
   price_paise:   number
   duration_mins: number
+  likes_count:   number
+  is_liked:      boolean
+}
+
+export interface ProviderDetail extends Provider {
+  phone:         string | null
+  city_name:     string | null
+  category_slug: string
+}
+
+export interface Booking {
+  id:           string
+  status:       string
+  scheduled_at: string
+}
+
+export interface BookingSummary {
+  id:            string
+  provider_name: string
+  service_title: string
+  scheduled_at:  string
+  status:        string
+  price_paise:   number
 }
 
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────
@@ -180,6 +218,19 @@ function makeHeaders(token?: string | null): Record<string, string> {
 
 async function _get<T>(url: string): Promise<T> {
   const res = await fetch(url)
+  if (!res.ok) throw await _apiError(res)
+  return res.json() as Promise<T>
+}
+
+/**
+ * GET with optional auth. Sends the Firebase token if the user is logged in,
+ * falls back to an unauthenticated request if not. The server returns is_liked
+ * per row when a token is present.
+ */
+async function _authOrGet<T>(url: string): Promise<T> {
+  let token: string | null = null
+  try { token = await getIdToken() } catch { /* not logged in */ }
+  const res = await fetch(url, { headers: makeHeaders(token) })
   if (!res.ok) throw await _apiError(res)
   return res.json() as Promise<T>
 }

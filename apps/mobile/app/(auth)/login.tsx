@@ -10,7 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native'
-import { Link, useRouter } from 'expo-router'
+import { Link, useRouter, useLocalSearchParams } from 'expo-router'
 import { useState } from 'react'
 import { useAuth } from '../../lib/auth-context'
 
@@ -19,6 +19,7 @@ const LOGO = require('../../assets/images/logo_pure.jpeg')
 export default function LoginScreen() {
   const { login }   = useAuth()
   const router      = useRouter()
+  const { returnTo } = useLocalSearchParams<{ returnTo?: string }>()
 
   const [email,    setEmail]    = useState('')
   const [password, setPassword] = useState('')
@@ -38,7 +39,11 @@ export default function LoginScreen() {
     setLoading(true)
     try {
       await login(e, p)
-      router.replace('/(tabs)/home')
+      if (returnTo) {
+        router.replace(returnTo as any)
+      } else {
+        router.replace('/(tabs)/home')
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Login failed. Please try again.'
       setError(msg)

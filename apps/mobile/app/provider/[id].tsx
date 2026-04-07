@@ -1,0 +1,783 @@
+import React, { useEffect, useState, useCallback } from 'react'
+import {
+  View,
+  Text,
+  ScrollView,
+  Pressable,
+  TextInput,
+  ActivityIndicator,
+  StyleSheet,
+  Alert,
+  Platform,
+  Image,
+  useWindowDimensions,
+} from 'react-native'
+import { useLocalSearchParams, useRouter } from 'expo-router'
+import { ProvidersAPI, BookingsAPI, ProviderDetail } from '../../lib/api'
+import { useAuth } from '../../lib/auth-context'
+
+// ─── placeholder gallery images (same for all providers until real upload exists) ──
+// Replace with actual uploaded images per provider from backend
+const GALLERY_IMAGES = [
+  require('../../assets/images/salon1.jpeg'),
+  require('../../assets/images/salon2.jpeg'),
+]
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+function formatRupees(paise: number) {
+  return `₹${Math.round(paise / 100)}`
+}
+
+function addDays(date: Date, n: number) {
+  const d = new Date(date)
+  d.setDate(d.getDate() + n)
+  return d
+}
+
+const DAYS_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const DAYS_FULL  = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const MONTHS_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December']
+
+function dayLabel(d: Date) {
+  return DAYS_FULL[d.getDay()]
+}
+
+function dateLabel(d: Date) {
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}`
+}
+
+/** Return the Monday of the week containing `d` */
+function weekStart(d: Date): Date {
+  const day = d.getDay() // 0 Sun … 6 Sat
+  const diff = (day === 0 ? -6 : 1 - day)  // shift to Monday
+  const m = new Date(d)
+  m.setDate(m.getDate() + diff)
+  m.setHours(0, 0, 0, 0)
+  return m
+}
+
+/** Return 7 consecutive dates starting from `monday` */
+function weekDates(monday: Date): Date[] {
+  return Array.from({ length: 7 }, (_, i) => addDays(monday, i))
+}
+
+function buildTimeSlots(durationMins: number): string[] {
+  const slots: string[] = []
+  const start = 9 * 60   // 9:00 AM
+  const end   = 19 * 60  // 7:00 PM
+  const step  = Math.max(durationMins, 30)
+  for (let t = start; t + step <= end; t += step) {
+    const h = Math.floor(t / 60)
+    const m = t % 60
+    const suffix = h < 12 ? 'AM' : 'PM'
+    const h12 = h <= 12 ? h : h - 12
+    slots.push(`${h12}:${m.toString().padStart(2, '0')} ${suffix}`)
+  }
+  return slots
+}
+
+function toISO(date: Date, timeSlot: string): string {
+  // timeSlot e.g. "9:00 AM"
+  const [timePart, suffix] = timeSlot.split(' ')
+  let [h, m] = timePart.split(':').map(Number)
+  if (suffix === 'PM' && h !== 12) h += 12
+  if (suffix === 'AM' && h === 12) h = 0
+  const d = new Date(date)
+  d.setHours(h, m, 0, 0)
+  return d.toISOString()
+}
+
+// ─── component ────────────────────────────────────────────────────────────────
+
+export default function ProviderBookingPage() {
+  const { id, sid, _date, _slot, _notes } = useLocalSearchParams<{
+    id: string; sid: string
+    _date?: string; _slot?: string; _notes?: string
+  }>()
+  const router = useRouter()
+  const { isSignedIn, isLoading: authLoading } = useAuth()
+  const { width } = useWindowDimensions()
+
+  // two-column when wide enough (tablet / web)
+  const isWide = width >= 720
+
+  const [provider, setProvider]       = useState<ProviderDetail | null>(null)
+  const [loading, setLoading]         = useState(true)
+  const [error, setError]             = useState<string | null>(null)
+  const [activePhoto, setActivePhoto] = useState(0)
+
+  // date selection — week-based calendar
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  // restore from params (returned from login) or default to today
+  const [selectedDate, setSelectedDate] = useState<Date>(() => {
+    if (_date) {
+      const d = new Date(_date)
+      if (!isNaN(d.getTime())) return d
+    }
+    return today
+  })
+
+  const [weekMonday, setWeekMonday] = useState<Date>(() => weekStart(selectedDate))
+
+  // time slot — restore from params
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(_slot ?? null)
+
+  // notes — restore from params
+  const [notes, setNotes] = useState(_notes ?? '')
+
+  // booking state
+  const [booking, setBooking]     = useState(false)
+  const [booked, setBooked]       = useState(false)
+  const [bookedISO, setBookedISO] = useState<string | null>(null)
+
+  // ── fetch provider detail ──
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    ProvidersAPI.get(id, sid)
+      .then(({ provider: p }) => {
+        if (!cancelled) setProvider(p)
+      })
+      .catch(() => {
+        if (!cancelled) setError('Could not load provider. Please try again.')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [id, sid])
+
+  // ── reset slot when date changes ──
+  useEffect(() => { setSelectedSlot(null) }, [selectedDate])
+
+  const currentWeek = weekDates(weekMonday)
+  const prevWeekDisabled = weekMonday <= today
+
+  function goToPrevWeek() {
+    const prev = addDays(weekMonday, -7)
+    const clampedMonday = prev < today ? weekStart(today) : prev
+    setWeekMonday(clampedMonday)
+  }
+
+  function goToNextWeek() {
+    setWeekMonday(addDays(weekMonday, 7))
+  }
+
+  const timeSlots = provider ? buildTimeSlots(provider.duration_mins) : []
+
+  // ── submit booking ──
+  const handleBook = useCallback(async () => {
+    if (!isSignedIn) {
+      // Build return URL with full current state so it's restored after login
+      const returnTo = `/provider/${encodeURIComponent(id)}?sid=${encodeURIComponent(sid)}` +
+        `&_date=${encodeURIComponent(selectedDate.toISOString())}` +
+        (selectedSlot ? `&_slot=${encodeURIComponent(selectedSlot)}` : '') +
+        (notes.trim() ? `&_notes=${encodeURIComponent(notes.trim())}` : '')
+      router.push({ pathname: '/(auth)/login', params: { returnTo } } as any)
+      return
+    }
+    if (!provider || !selectedSlot) return
+    setBooking(true)
+    try {
+      const iso = toISO(selectedDate, selectedSlot)
+      await BookingsAPI.create({
+        providerServiceId: provider.service_id,
+        scheduledAt: iso,
+        notes: notes.trim() || undefined,
+      })
+      setBookedISO(iso)
+      setBooked(true)
+    } catch (err: any) {
+      const msg = err?.message ?? 'Booking failed. Please try again.'
+      Alert.alert('Error', msg)
+    } finally {
+      setBooking(false)
+    }
+  }, [provider, selectedSlot, selectedDate, notes])
+
+  // ── loading ──
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#7c6af7" />
+      </View>
+    )
+  }
+
+  // ── error ──
+  if (error || !provider) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorText}>{error ?? 'Provider not found.'}</Text>
+        <Pressable style={styles.retryBtn} onPress={() => router.back()}>
+          <Text style={styles.retryBtnText}>Go back</Text>
+        </Pressable>
+      </View>
+    )
+  }
+
+  // ── success / confirmation ──
+  if (booked && bookedISO) {
+    const dt = new Date(bookedISO)
+    return (
+      <View style={styles.center}>
+        <View style={styles.successCard}>
+          <Text style={styles.successIcon}>✓</Text>
+          <Text style={styles.successTitle}>Booking Requested!</Text>
+          <Text style={styles.successSub}>{provider.name}</Text>
+          <Text style={styles.successDetail}>{provider.service_title}</Text>
+          <Text style={styles.successDetail}>
+            {dayLabel(dt)}, {dateLabel(dt)} · {selectedSlot}
+          </Text>
+          <Text style={styles.successNote}>
+            The provider will confirm your booking soon.
+          </Text>
+          <Pressable style={styles.doneBtn} onPress={() => router.back()}>
+            <Text style={styles.doneBtnText}>Done</Text>
+          </Pressable>
+        </View>
+      </View>
+    )
+  }
+
+  // ── main booking page ──
+  const initial = provider.name.charAt(0).toUpperCase()
+  const canBook = !!selectedSlot
+
+  // ── booking panel (shared between narrow and wide layouts) ──
+  const BookingPanel = (
+    <ScrollView
+      style={styles.bookingScroll}
+      contentContainerStyle={styles.bookingScrollContent}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* provider info */}
+      <View style={styles.providerCard}>
+        <View style={styles.avatarCircle}>
+          <Text style={styles.avatarText}>{initial}</Text>
+        </View>
+        <View style={styles.providerInfo}>
+          <Text style={styles.providerName}>{provider.name}</Text>
+          {(provider.area_name || provider.city_name) && (
+            <Text style={styles.providerLocation}>
+              {[provider.area_name, provider.city_name].filter(Boolean).join(', ')}
+            </Text>
+          )}
+          <Text style={styles.providerService}>{provider.service_title}</Text>
+        </View>
+        <View style={styles.providerPriceBlock}>
+          <Text style={styles.providerPrice}>{formatRupees(provider.price_paise)}</Text>
+          <Text style={styles.providerDuration}>{provider.duration_mins} min</Text>
+        </View>
+      </View>
+
+      {/* weekly calendar */}
+      <View style={styles.calendarCard}>
+        <View style={styles.calendarHeader}>
+          <Pressable
+            style={[styles.calNavBtn, prevWeekDisabled && styles.calNavBtnDisabled]}
+            onPress={goToPrevWeek}
+            disabled={prevWeekDisabled}
+          >
+            <Text style={[styles.calNavArrow, prevWeekDisabled && styles.calNavArrowDisabled]}>‹</Text>
+          </Pressable>
+          <Text style={styles.calMonthLabel}>
+            {MONTHS_FULL[currentWeek[0].getMonth()]} {currentWeek[0].getFullYear()}
+            {currentWeek[0].getMonth() !== currentWeek[6].getMonth()
+              ? ` / ${MONTHS_FULL[currentWeek[6].getMonth()]}`
+              : ''}
+          </Text>
+          <Pressable style={styles.calNavBtn} onPress={goToNextWeek}>
+            <Text style={styles.calNavArrow}>›</Text>
+          </Pressable>
+        </View>
+        <View style={styles.calDayRow}>
+          {DAYS_SHORT.map(d => (
+            <Text key={d} style={styles.calDayName}>{d}</Text>
+          ))}
+        </View>
+        <View style={styles.calDayRow}>
+          {currentWeek.map((d, i) => {
+            const sel  = d.toDateString() === selectedDate.toDateString()
+            const past = d < today
+            return (
+              <Pressable
+                key={i}
+                style={styles.calDayCell}
+                onPress={() => { if (!past) setSelectedDate(d) }}
+                disabled={past}
+              >
+                <View style={[styles.calDayCircle, sel && styles.calDayCircleSel, past && styles.calDayCirclePast]}>
+                  <Text style={[styles.calDayNum, sel && styles.calDayNumSel, past && styles.calDayNumPast]}>
+                    {d.getDate()}
+                  </Text>
+                </View>
+                <Text style={[styles.calDayMon, sel && styles.calDayMonSel, past && styles.calDayNumPast]}>
+                  {MONTHS[d.getMonth()]}
+                </Text>
+              </Pressable>
+            )
+          })}
+        </View>
+      </View>
+
+      {/* time slots */}
+      <Text style={styles.sectionTitle}>Select a time slot</Text>
+      <View style={styles.slotsGrid}>
+        {timeSlots.map((slot) => {
+          const sel = slot === selectedSlot
+          return (
+            <Pressable
+              key={slot}
+              style={[styles.slotPill, sel && styles.slotPillSel]}
+              onPress={() => setSelectedSlot(sel ? null : slot)}
+            >
+              <Text style={[styles.slotText, sel && styles.slotTextSel]}>{slot}</Text>
+            </Pressable>
+          )
+        })}
+      </View>
+
+      {/* notes */}
+      <Text style={styles.sectionTitle}>Notes <Text style={styles.optionalLabel}>(optional)</Text></Text>
+      <TextInput
+        style={styles.notesInput}
+        placeholder="Any special requests or notes for the provider…"
+        placeholderTextColor="#aaa"
+        multiline
+        numberOfLines={3}
+        value={notes}
+        onChangeText={setNotes}
+        maxLength={500}
+      />
+
+      {/* CTA inside scroll on narrow, also shown below on wide */}
+      {!isWide && (
+        <View style={styles.ctaInline}>
+          {!authLoading && !isSignedIn ? (
+            <>
+              <Text style={styles.loginPrompt}>Please login to book an appointment</Text>
+              <Pressable style={styles.bookBtn} onPress={handleBook}>
+                <Text style={styles.bookBtnText}>Login to Book</Text>
+              </Pressable>
+            </>
+          ) : (
+            <Pressable
+              style={[styles.bookBtn, !canBook && styles.bookBtnDisabled]}
+              onPress={handleBook}
+              disabled={!canBook || booking}
+            >
+              {booking
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <Text style={styles.bookBtnText}>
+                    {canBook ? `Request Booking · ${selectedSlot}` : 'Select a time slot'}
+                  </Text>
+              }
+            </Pressable>
+          )}
+        </View>
+      )}
+
+      <View style={{ height: isWide ? 32 : 100 }} />
+    </ScrollView>
+  )
+
+  // ── photo gallery panel ──
+  const GalleryPanel = (
+    <View style={styles.galleryPanel}>
+      {/* main photo */}
+      <Image
+        source={GALLERY_IMAGES[activePhoto]}
+        style={styles.galleryMainPhoto}
+        resizeMode="cover"
+      />
+      {/* thumbnail strip */}
+      <View style={styles.galleryThumbs}>
+        {GALLERY_IMAGES.map((img, i) => (
+          <Pressable key={i} onPress={() => setActivePhoto(i)}>
+            <Image
+              source={img}
+              style={[styles.galleryThumb, activePhoto === i && styles.galleryThumbActive]}
+              resizeMode="cover"
+            />
+          </Pressable>
+        ))}
+      </View>
+      {/* provider name overlay */}
+      <View style={styles.galleryOverlay}>
+        <View style={styles.galleryAvatarCircle}>
+          <Text style={styles.galleryAvatarText}>{initial}</Text>
+        </View>
+        <View>
+          <Text style={styles.galleryOverlayName}>{provider.name}</Text>
+          {(provider.area_name || provider.city_name) && (
+            <Text style={styles.galleryOverlayLocation}>
+              {[provider.area_name, provider.city_name].filter(Boolean).join(', ')}
+            </Text>
+          )}
+        </View>
+      </View>
+    </View>
+  )
+
+  return (
+    <View style={styles.root}>
+      {/* ── header ── */}
+      <View style={styles.header}>
+        <Pressable style={styles.backBtn} onPress={() => router.back()}>
+          <Text style={styles.backArrow}>←</Text>
+        </Pressable>
+        <Text style={styles.headerTitle} numberOfLines={1}>{provider.name}</Text>
+        <View style={styles.backBtn} />
+      </View>
+
+      {isWide ? (
+        /* ── wide: two-column side-by-side ── */
+        <View style={styles.wideLayout}>
+          <View style={styles.wideLeft}>
+            {GalleryPanel}
+          </View>
+          <View style={styles.wideDivider} />
+          <View style={styles.wideRight}>
+            {BookingPanel}
+            {/* sticky CTA at bottom of right column */}
+            <View style={styles.ctaBarWide}>
+              {!authLoading && !isSignedIn ? (
+                <>
+                  <Text style={styles.loginPrompt}>Please login to book an appointment</Text>
+                  <Pressable style={styles.bookBtn} onPress={handleBook}>
+                    <Text style={styles.bookBtnText}>Login to Book</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <Pressable
+                  style={[styles.bookBtn, !canBook && styles.bookBtnDisabled]}
+                  onPress={handleBook}
+                  disabled={!canBook || booking}
+                >
+                  {booking
+                    ? <ActivityIndicator color="#fff" size="small" />
+                    : <Text style={styles.bookBtnText}>
+                        {canBook ? `Request Booking · ${selectedSlot}` : 'Select a time slot'}
+                      </Text>
+                  }
+                </Pressable>
+              )}
+            </View>
+          </View>
+        </View>
+      ) : (
+        /* ── narrow: gallery stacked above booking ── */
+        <View style={{ flex: 1 }}>
+          <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+            {/* gallery at top */}
+            <Image
+              source={GALLERY_IMAGES[activePhoto]}
+              style={styles.narrowMainPhoto}
+              resizeMode="cover"
+            />
+            <View style={styles.narrowThumbs}>
+              {GALLERY_IMAGES.map((img, i) => (
+                <Pressable key={i} onPress={() => setActivePhoto(i)}>
+                  <Image
+                    source={img}
+                    style={[styles.narrowThumb, activePhoto === i && styles.galleryThumbActive]}
+                    resizeMode="cover"
+                  />
+                </Pressable>
+              ))}
+            </View>
+            <View style={styles.scrollContent}>
+              {BookingPanel}
+            </View>
+          </ScrollView>
+          {/* sticky CTA bar */}
+          <View style={styles.ctaBar}>
+            {!authLoading && !isSignedIn ? (
+              <>
+                <Text style={styles.loginPrompt}>Please login to book an appointment</Text>
+                <Pressable style={styles.bookBtn} onPress={handleBook}>
+                  <Text style={styles.bookBtnText}>Login to Book</Text>
+                </Pressable>
+              </>
+            ) : (
+              <Pressable
+                style={[styles.bookBtn, !canBook && styles.bookBtnDisabled]}
+                onPress={handleBook}
+                disabled={!canBook || booking}
+              >
+                {booking
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.bookBtnText}>
+                      {canBook ? `Request Booking · ${selectedSlot}` : 'Select a time slot'}
+                    </Text>
+                }
+              </Pressable>
+            )}
+          </View>
+        </View>
+      )}
+    </View>
+  )
+}
+
+// ─── styles ───────────────────────────────────────────────────────────────────
+
+const PURPLE    = '#7c6af7'
+const PURPLE_BG = '#f4f0ff'
+const PURPLE_BD = '#c0b8f0'
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#f0f0f5' },
+
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f8f8', padding: 24 },
+  errorText: { color: '#e55', fontSize: 15, textAlign: 'center', marginBottom: 16 },
+  retryBtn: { backgroundColor: PURPLE, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 24 },
+  retryBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+
+  // ── header ──
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: Platform.OS === 'ios' ? 56 : 16,
+    paddingBottom: 14,
+    paddingHorizontal: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    zIndex: 10,
+  },
+  backBtn: { width: 36, height: 36, justifyContent: 'center' },
+  backArrow: { fontSize: 22, color: PURPLE, fontWeight: '700' },
+  headerTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700', color: '#1a1a1a' },
+
+  // ── wide two-column layout ──
+  wideLayout: { flex: 1, flexDirection: 'row' },
+  wideDivider: { width: 1, backgroundColor: '#e8e8e8' },
+  wideLeft: { flex: 1 },
+  wideRight: { flex: 1, backgroundColor: '#fff' },
+
+  // ── gallery panel (wide) ──
+  galleryPanel: { flex: 1, backgroundColor: '#111', position: 'relative' },
+  galleryMainPhoto: { width: '100%', flex: 1 },
+  galleryThumbs: {
+    flexDirection: 'row',
+    gap: 8,
+    padding: 10,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    position: 'absolute',
+    bottom: 80,
+    left: 0,
+    right: 0,
+  },
+  galleryThumb: {
+    width: 72,
+    height: 52,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  galleryThumbActive: { borderColor: PURPLE },
+  galleryOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 16,
+    paddingBottom: 20,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  galleryAvatarCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#fdf0f4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  galleryAvatarText: { fontSize: 18, fontWeight: '800', color: '#c06080' },
+  galleryOverlayName: { color: '#fff', fontWeight: '800', fontSize: 16 },
+  galleryOverlayLocation: { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginTop: 2 },
+
+  // ── narrow layout ──
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: 16, paddingTop: 8 },
+  narrowMainPhoto: { width: '100%', height: 220 },
+  narrowThumbs: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#1a1a1a',
+  },
+  narrowThumb: {
+    width: 68,
+    height: 50,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+
+  // ── booking scroll (inside wideRight) ──
+  bookingScroll: { flex: 1 },
+  bookingScrollContent: { padding: 16 },
+
+  // ── provider card ──
+  providerCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+  },
+  avatarCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#fdf0f4',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  avatarText: { fontSize: 20, fontWeight: '800', color: '#c06080' },
+  providerInfo: { flex: 1 },
+  providerName: { fontSize: 15, fontWeight: '800', color: '#1a1a1a', marginBottom: 2 },
+  providerLocation: { fontSize: 11, color: '#888', marginBottom: 2 },
+  providerService: { fontSize: 11, fontWeight: '600', color: '#757575' },
+  providerPriceBlock: { alignItems: 'flex-end' },
+  providerPrice: { fontSize: 15, fontWeight: '800', color: '#1a1a1a' },
+  providerDuration: { fontSize: 11, color: '#888', marginTop: 2 },
+
+  // ── section ──
+  sectionTitle: { fontSize: 13, fontWeight: '700', color: '#1a1a1a', marginBottom: 10, letterSpacing: 0.2 },
+  optionalLabel: { fontWeight: '400', color: '#aaa' },
+
+  // ── calendar ──
+  calendarCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 10,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+  },
+  calendarHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+    paddingHorizontal: 2,
+  },
+  calMonthLabel: { fontSize: 14, fontWeight: '700', color: '#1a1a1a' },
+  calNavBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#f4f0ff', alignItems: 'center', justifyContent: 'center' },
+  calNavBtnDisabled: { backgroundColor: '#f0f0f0' },
+  calNavArrow: { fontSize: 20, color: PURPLE, lineHeight: 24, fontWeight: '700' },
+  calNavArrowDisabled: { color: '#ccc' },
+  calDayRow: { flexDirection: 'row', justifyContent: 'space-around' },
+  calDayName: { width: 34, textAlign: 'center', fontSize: 10, fontWeight: '600', color: '#999', marginBottom: 6 },
+  calDayCell: { width: 34, alignItems: 'center', paddingVertical: 3 },
+  calDayCircle: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  calDayCircleSel: { backgroundColor: PURPLE },
+  calDayCirclePast: { opacity: 0.35 },
+  calDayNum: { fontSize: 14, fontWeight: '700', color: '#1a1a1a' },
+  calDayNumSel: { color: '#fff' },
+  calDayNumPast: { color: '#bbb' },
+  calDayMon: { fontSize: 8, color: '#aaa', marginTop: 2, fontWeight: '500' },
+  calDayMonSel: { color: PURPLE, fontWeight: '700' },
+
+  // ── time slots ──
+  slotsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
+  slotPill: {
+    width: '30.5%',
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    borderWidth: 1.5,
+    borderColor: '#e0e0e0',
+    alignItems: 'center',
+  },
+  slotPillSel: { borderColor: PURPLE, borderWidth: 2, backgroundColor: PURPLE_BG },
+  slotText: { fontSize: 12, fontWeight: '600', color: '#333' },
+  slotTextSel: { color: PURPLE, fontWeight: '700' },
+
+  // ── notes ──
+  notesInput: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#e8e8e8',
+    padding: 12,
+    fontSize: 14,
+    color: '#1a1a1a',
+    minHeight: 80,
+    textAlignVertical: 'top',
+    marginBottom: 8,
+  },
+
+  // ── CTA ──
+  ctaInline: { marginTop: 8 },
+  ctaBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 16,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  ctaBarWide: {
+    padding: 16,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  loginPrompt: { fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 10 },
+  bookBtn: { backgroundColor: PURPLE, borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
+  bookBtnDisabled: { backgroundColor: '#d0d0d0' },
+  bookBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+
+  // ── success ──
+  successCard: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 28,
+    alignItems: 'center',
+    maxWidth: 340,
+    width: '100%',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  successIcon: { fontSize: 48, color: PURPLE, marginBottom: 12 },
+  successTitle: { fontSize: 22, fontWeight: '800', color: '#1a1a1a', marginBottom: 8 },
+  successSub: { fontSize: 16, fontWeight: '700', color: '#333', marginBottom: 4 },
+  successDetail: { fontSize: 14, color: '#555', marginBottom: 4, textAlign: 'center' },
+  successNote: { fontSize: 12, color: '#aaa', textAlign: 'center', marginTop: 12, marginBottom: 20 },
+  doneBtn: { backgroundColor: PURPLE, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 40 },
+  doneBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+})
+
