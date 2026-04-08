@@ -117,6 +117,7 @@ CREATE TABLE providers (
   lat         NUMERIC(9,6),
   lng         NUMERIC(9,6),
   phone       TEXT,
+  likes_count INTEGER     NOT NULL DEFAULT 0,
   status      TEXT        NOT NULL DEFAULT 'active'
                           CHECK (status IN ('active', 'inactive', 'suspended')),
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -126,6 +127,16 @@ CREATE TABLE providers (
 CREATE INDEX idx_providers_city_id  ON providers(city_id);
 CREATE INDEX idx_providers_area_id  ON providers(area_id);
 CREATE INDEX idx_providers_status   ON providers(status);
+
+-- ── provider_likes ──────────────────────────────────────────────────────────
+CREATE TABLE provider_likes (
+  user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider_id UUID        NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, provider_id)
+);
+
+CREATE INDEX idx_provider_likes_provider_id ON provider_likes(provider_id);
 
 -- ── provider_services ────────────────────────────────────────────────────────
 -- Maps a provider to the categories they offer, with their price/duration.

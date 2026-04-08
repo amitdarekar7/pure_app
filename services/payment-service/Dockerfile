@@ -1,6 +1,7 @@
-FROM rust:1.77-alpine AS builder
+FROM rust:1.88-alpine AS builder
 RUN apk add --no-cache musl-dev pkgconfig openssl-dev
 WORKDIR /app
+ENV SQLX_OFFLINE=true
 
 # Cache dependencies by building a dummy main first
 COPY Cargo.toml ./
@@ -11,6 +12,7 @@ RUN rm -f target/release/deps/payment_service*
 # Build real source
 COPY src ./src
 COPY migrations ./migrations
+COPY .sqlx ./.sqlx
 RUN cargo build --release
 
 FROM alpine:3.19

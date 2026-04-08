@@ -72,7 +72,7 @@ services:
     volumes:
       - opensearch_data:/usr/share/opensearch/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -v '\"status\":\"red\"'"]
+      test: ["CMD-SHELL", "curl -sfu admin:OpenSearch_2024! http://localhost:9200/_cluster/health | grep -v '\"status\":\"red\"'"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -85,6 +85,7 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_OPTS: "-Dzookeeper.4lw.commands.whitelist=ruok,srvr,stat"
     healthcheck:
       test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
       interval: 10s
@@ -129,6 +130,7 @@ services:
       NODE_ENV: development
       # Read from host environment (set via services/core-api/.env or shell export)
       FIREBASE_SERVICE_ACCOUNT_BASE64: ${FIREBASE_SERVICE_ACCOUNT_BASE64}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/tmp/fake-firebase.json}
     depends_on:
       postgres-core:
         condition: service_healthy
@@ -145,7 +147,7 @@ services:
     ports:
       - "3001:3001"
     environment:
-      OPENSEARCH_URL: http://opensearch:9200
+      OPENSEARCH_URL: http://admin:OpenSearch_2024!@opensearch:9200
       KAFKA_BROKERS: kafka:29092
       PORT: "3001"
     depends_on:

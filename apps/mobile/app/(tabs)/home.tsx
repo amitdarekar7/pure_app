@@ -38,9 +38,11 @@ export default function HomeScreen() {
 
   // ── Location state ──────────────────────────────────────────────────────
   const [cities,      setCities]      = useState<City[]>([])
+  const [citiesLoading, setCitiesLoading] = useState(true)
   const [city,        setCity]        = useState<City | null>(null)
   const [showCities,  setShowCities]  = useState(false)
   const [areas,       setAreas]       = useState<Area[]>([])
+  const [areasLoading, setAreasLoading] = useState(false)
   const [area,        setArea]        = useState<Area | null>(null)
   const [showAreas,   setShowAreas]   = useState(false)
 
@@ -68,15 +70,18 @@ export default function HomeScreen() {
     LocationAPI.cities()
       .then(({ cities: data }) => setCities(data))
       .catch(() => setCities([]))
+      .finally(() => setCitiesLoading(false))
   }, [])
 
   useEffect(() => {
     if (!city) { setAreas([]); setArea(null); return }
     setArea(null)
     setAreas([])
+    setAreasLoading(true)
     LocationAPI.areas(city.id)
       .then(({ areas: data }) => setAreas(data))
       .catch(() => setAreas([]))
+      .finally(() => setAreasLoading(false))
   }, [city])
 
   function closeAll() {
@@ -223,9 +228,13 @@ export default function HomeScreen() {
 
         {showCities && (
           <View style={styles.dropdown}>
-            {cities.length === 0 ? (
+            {citiesLoading ? (
               <View style={styles.dropdownEmpty}>
                 <Text style={styles.dropdownEmptyText}>Loading cities…</Text>
+              </View>
+            ) : cities.length === 0 ? (
+              <View style={styles.dropdownEmpty}>
+                <Text style={styles.dropdownEmptyText}>No cities available</Text>
               </View>
             ) : (() => {
               const filtered = citySearch.trim()
@@ -284,9 +293,13 @@ export default function HomeScreen() {
 
         {showAreas && (
           <View style={styles.dropdown}>
-            {areas.length === 0 ? (
+            {areasLoading ? (
               <View style={styles.dropdownEmpty}>
                 <Text style={styles.dropdownEmptyText}>Loading areas…</Text>
+              </View>
+            ) : areas.length === 0 ? (
+              <View style={styles.dropdownEmpty}>
+                <Text style={styles.dropdownEmptyText}>No areas available</Text>
               </View>
             ) : (() => {
               const filtered = areaSearch.trim()

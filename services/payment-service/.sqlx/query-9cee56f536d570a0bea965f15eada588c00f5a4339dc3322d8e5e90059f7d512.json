@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO outbox_events (aggregate_id, event_type, payload) VALUES ($1, 'payment.intent.created', $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9cee56f536d570a0bea965f15eada588c00f5a4339dc3322d8e5e90059f7d512"
+}
