@@ -256,23 +256,15 @@ export default function ProviderBookingPage() {
       contentContainerStyle={styles.bookingScrollContent}
       showsVerticalScrollIndicator={false}
     >
-      {/* provider info */}
-      <View style={styles.providerCard}>
-        <View style={styles.avatarCircle}>
-          <Text style={styles.avatarText}>{initial}</Text>
+      {/* ── selected service highlight ── */}
+      <View style={styles.serviceBadge}>
+        <View style={styles.serviceBadgeLeft}>
+          <Text style={styles.serviceBadgeLabel}>Booking for</Text>
+          <Text style={styles.serviceBadgeTitle}>{provider.service_title}</Text>
         </View>
-        <View style={styles.providerInfo}>
-          <Text style={styles.providerName}>{provider.name}</Text>
-          {(provider.area_name || provider.city_name) && (
-            <Text style={styles.providerLocation}>
-              {[provider.area_name, provider.city_name].filter(Boolean).join(', ')}
-            </Text>
-          )}
-          <Text style={styles.providerService}>{provider.service_title}</Text>
-        </View>
-        <View style={styles.providerPriceBlock}>
-          <Text style={styles.providerPrice}>{formatRupees(provider.price_paise)}</Text>
-          <Text style={styles.providerDuration}>{provider.duration_mins} min</Text>
+        <View style={styles.serviceBadgeRight}>
+          <Text style={styles.serviceBadgePrice}>{formatRupees(provider.price_paise)}</Text>
+          <Text style={styles.serviceBadgeDuration}>{provider.duration_mins} min</Text>
         </View>
       </View>
 
@@ -396,6 +388,23 @@ export default function ProviderBookingPage() {
         style={styles.galleryMainPhoto}
         resizeMode="cover"
       />
+      {/* slide arrows */}
+      {GALLERY_IMAGES.length > 1 && (
+        <>
+          <Pressable
+            style={[styles.galleryArrow, styles.galleryArrowLeft]}
+            onPress={() => setActivePhoto(prev => (prev - 1 + GALLERY_IMAGES.length) % GALLERY_IMAGES.length)}
+          >
+            <Text style={styles.galleryArrowText}>‹</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.galleryArrow, styles.galleryArrowRight]}
+            onPress={() => setActivePhoto(prev => (prev + 1) % GALLERY_IMAGES.length)}
+          >
+            <Text style={styles.galleryArrowText}>›</Text>
+          </Pressable>
+        </>
+      )}
       {/* thumbnail strip */}
       <View style={styles.galleryThumbs}>
         {GALLERY_IMAGES.map((img, i) => (
@@ -438,37 +447,39 @@ export default function ProviderBookingPage() {
 
       {isWide ? (
         /* ── wide: two-column side-by-side ── */
-        <View style={styles.wideLayout}>
-          <View style={styles.wideLeft}>
-            {GalleryPanel}
-          </View>
-          <View style={styles.wideDivider} />
-          <View style={styles.wideRight}>
-            {BookingPanel}
-            {/* sticky CTA at bottom of right column */}
-            <View style={styles.ctaBarWide}>
-              {!authLoading && !isSignedIn ? (
-                <>
-                  <Text style={styles.loginPrompt}>Please login to book an appointment</Text>
-                  <Pressable style={styles.bookBtn} onPress={handleBook}>
-                    <Text style={styles.bookBtnText}>Login to Book</Text>
-                  </Pressable>
-                </>
-              ) : (
-                <Pressable
-                  style={[styles.bookBtn, !canBook && styles.bookBtnDisabled]}
-                  onPress={handleBook}
-                  disabled={!canBook || booking}
-                >
-                  {booking
-                    ? <ActivityIndicator color="#fff" size="small" />
-                    : <Text style={styles.bookBtnText}>
-                        {canBook ? `Request Booking · ${selectedSlot}` : 'Select a time slot'}
-                      </Text>
-                  }
-                </Pressable>
-              )}
+        <View style={{ flex: 1 }}>
+          <View style={styles.wideLayout}>
+            <View style={styles.wideLeft}>
+              {GalleryPanel}
             </View>
+            <View style={styles.wideDivider} />
+            <View style={styles.wideRight}>
+              {BookingPanel}
+            </View>
+          </View>
+          {/* full-width CTA spanning both columns */}
+          <View style={styles.ctaBarFull}>
+            {!authLoading && !isSignedIn ? (
+              <>
+                <Text style={styles.loginPrompt}>Please login to book an appointment</Text>
+                <Pressable style={styles.bookBtn} onPress={handleBook}>
+                  <Text style={styles.bookBtnText}>Login to Book</Text>
+                </Pressable>
+              </>
+            ) : (
+              <Pressable
+                style={[styles.bookBtn, !canBook && styles.bookBtnDisabled]}
+                onPress={handleBook}
+                disabled={!canBook || booking}
+              >
+                {booking
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.bookBtnText}>
+                      {canBook ? `Request Booking · ${selectedSlot}` : 'Select a time slot'}
+                    </Text>
+                }
+              </Pressable>
+            )}
           </View>
         </View>
       ) : (
@@ -476,11 +487,29 @@ export default function ProviderBookingPage() {
         <View style={{ flex: 1 }}>
           <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
             {/* gallery at top */}
-            <Image
-              source={GALLERY_IMAGES[activePhoto]}
-              style={styles.narrowMainPhoto}
-              resizeMode="cover"
-            />
+            <View style={styles.narrowPhotoWrap}>
+              <Image
+                source={GALLERY_IMAGES[activePhoto]}
+                style={styles.narrowMainPhoto}
+                resizeMode="cover"
+              />
+              {GALLERY_IMAGES.length > 1 && (
+                <>
+                  <Pressable
+                    style={[styles.galleryArrow, styles.galleryArrowLeft]}
+                    onPress={() => setActivePhoto(prev => (prev - 1 + GALLERY_IMAGES.length) % GALLERY_IMAGES.length)}
+                  >
+                    <Text style={styles.galleryArrowText}>‹</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.galleryArrow, styles.galleryArrowRight]}
+                    onPress={() => setActivePhoto(prev => (prev + 1) % GALLERY_IMAGES.length)}
+                  >
+                    <Text style={styles.galleryArrowText}>›</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
             <View style={styles.narrowThumbs}>
               {GALLERY_IMAGES.map((img, i) => (
                 <Pressable key={i} onPress={() => setActivePhoto(i)}>
@@ -533,7 +562,7 @@ const PURPLE_BG = '#f4f0ff'
 const PURPLE_BD = '#c0b8f0'
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f0f0f5' },
+  root: { flex: 1, backgroundColor: '#f8f8f8' },
 
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f8f8', padding: 24 },
   errorText: { color: '#e55', fontSize: 15, textAlign: 'center', marginBottom: 16 },
@@ -558,13 +587,25 @@ const styles = StyleSheet.create({
 
   // ── wide two-column layout ──
   wideLayout: { flex: 1, flexDirection: 'row' },
-  wideDivider: { width: 1, backgroundColor: '#e8e8e8' },
-  wideLeft: { flex: 1 },
-  wideRight: { flex: 1, backgroundColor: '#fff' },
+  wideDivider: { width: 0 },
+  wideLeft: { flex: 5, maxWidth: 520 },
+  wideRight: { flex: 7, backgroundColor: '#fff' },
 
   // ── gallery panel (wide) ──
-  galleryPanel: { flex: 1, backgroundColor: '#111', position: 'relative' },
+  galleryPanel: {
+    flex: 1,
+    backgroundColor: '#f8f8f8',
+    position: 'relative',
+    overflow: 'hidden',
+    // @ts-ignore web-only — fades all 4 edges + corners so the image dissolves
+    // smoothly into the page rather than hard-cutting
+    WebkitMaskImage:
+      'radial-gradient(ellipse 88% 92% at 44% 50%, black 55%, transparent 100%)',
+    maskImage:
+      'radial-gradient(ellipse 88% 92% at 44% 50%, black 55%, transparent 100%)',
+  },
   galleryMainPhoto: { width: '100%', flex: 1 },
+  vignetteEdge: { position: 'absolute' },
   galleryThumbs: {
     flexDirection: 'row',
     gap: 8,
@@ -611,7 +652,8 @@ const styles = StyleSheet.create({
 
   // ── narrow layout ──
   scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: 16, paddingTop: 8 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 8, width: '100%', maxWidth: 520, alignSelf: 'center' },
+  narrowPhotoWrap: { position: 'relative' },
   narrowMainPhoto: { width: '100%', height: 220 },
   narrowThumbs: {
     flexDirection: 'row',
@@ -649,15 +691,16 @@ const styles = StyleSheet.create({
     borderColor: '#f0f0f0',
   },
   avatarCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: '#fdf0f4',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+    flexShrink: 0,
   },
-  avatarText: { fontSize: 20, fontWeight: '800', color: '#c06080' },
+  avatarText: { fontSize: 17, fontWeight: '800', color: '#c06080' },
   providerInfo: { flex: 1 },
   providerName: { fontSize: 15, fontWeight: '800', color: '#1a1a1a', marginBottom: 2 },
   providerLocation: { fontSize: 11, color: '#888', marginBottom: 2 },
@@ -669,6 +712,26 @@ const styles = StyleSheet.create({
   // ── section ──
   sectionTitle: { fontSize: 13, fontWeight: '700', color: '#1a1a1a', marginBottom: 10, letterSpacing: 0.2 },
   optionalLabel: { fontWeight: '400', color: '#aaa' },
+
+  // ── service badge ──
+  serviceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f0edff',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#c0b8f0',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  serviceBadgeLeft: { flex: 1 },
+  serviceBadgeLabel: { fontSize: 10, fontWeight: '700', color: '#9b8fe0', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 3 },
+  serviceBadgeTitle: { fontSize: 15, fontWeight: '800', color: '#4a3db5' },
+  serviceBadgeRight: { alignItems: 'flex-end', marginLeft: 12 },
+  serviceBadgePrice: { fontSize: 16, fontWeight: '900', color: '#4a3db5' },
+  serviceBadgeDuration: { fontSize: 11, color: '#9b8fe0', marginTop: 2 },
 
   // ── calendar ──
   calendarCard: {
@@ -753,8 +816,37 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#eee',
   },
+  ctaBarFull: {
+    padding: 16,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  galleryArrow: {
+    position: 'absolute',
+    top: '50%',
+    marginTop: -26,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: PURPLE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+  },
+  galleryArrowLeft:  { left: 12 },
+  galleryArrowRight: { right: 12 },
+  galleryArrowText: { color: PURPLE, fontSize: 30, fontWeight: '900', lineHeight: 34, marginTop: -2 },
   loginPrompt: { fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 10 },
-  bookBtn: { backgroundColor: PURPLE, borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
+  bookBtn: { backgroundColor: PURPLE, borderRadius: 14, paddingVertical: 15, alignItems: 'center', alignSelf: 'stretch' },
   bookBtnDisabled: { backgroundColor: '#d0d0d0' },
   bookBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
 

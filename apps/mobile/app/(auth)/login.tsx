@@ -96,12 +96,12 @@ export default function LoginScreen() {
 
           {/* Recovery links */}
           <View style={styles.recoveryRow}>
-            <Link href="/(auth)/forgot-password" asChild>
+            <Link href={"/(auth)/forgot-password" as any} asChild>
               <Pressable>
                 <Text style={styles.recoveryLink}>Forgot Password?</Text>
               </Pressable>
             </Link>
-            <Link href="/(auth)/forgot-email" asChild>
+            <Link href={"/(auth)/forgot-email" as any} asChild>
               <Pressable>
                 <Text style={styles.recoveryLink}>Forgot Email?</Text>
               </Pressable>
