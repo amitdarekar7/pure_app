@@ -14,7 +14,7 @@ import { useRouter } from 'expo-router'
 import { useState } from 'react'
 import { PublicAuthAPI } from '../../lib/api'
 
-const LOGO = require('../../assets/images/logo_pure.jpeg')
+const LOGO = require('../../assets/images/logo_pure.png')
 
 export default function ForgotEmailScreen() {
   const router = useRouter()

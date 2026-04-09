@@ -14,7 +14,7 @@ import { Link, useRouter, useLocalSearchParams } from 'expo-router'
 import { useState } from 'react'
 import { useAuth } from '../../lib/auth-context'
 
-const LOGO = require('../../assets/images/logo_pure.jpeg')
+const LOGO = require('../../assets/images/logo_pure.png')
 
 export default function LoginScreen() {
   const { login }   = useAuth()
@@ -137,6 +137,13 @@ export default function LoginScreen() {
             </Link>
           </View>
 
+          {/* Provider portal link */}
+          <Link href="/(provider-auth)/login" asChild>
+            <Pressable style={styles.providerLink}>
+              <Text style={styles.providerLinkText}>Are you a provider? Sign in to your dashboard →</Text>
+            </Pressable>
+          </Link>
+
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -198,4 +205,6 @@ const styles = StyleSheet.create({
   footer:     { flexDirection: 'row', justifyContent: 'center' },
   footerText: { color: '#999', fontSize: 14 },
   link:       { color: '#7c6af7', fontSize: 14, fontWeight: '700' },
+  providerLink:     { alignItems: 'center', marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#ebebf5' },
+  providerLinkText: { color: '#7c6af7', fontSize: 13 },
 })

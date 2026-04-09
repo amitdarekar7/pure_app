@@ -123,13 +123,13 @@ services:
     networks: [app_net]
     ports:
       - "3000:3000"
+    env_file:
+      - ./services/core-api/.env
     environment:
       DATABASE_URL: postgres://core:core_secret@postgres-core:5432/core_db
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:29092
       NODE_ENV: development
-      # Read from host environment (set via services/core-api/.env or shell export)
-      FIREBASE_SERVICE_ACCOUNT_BASE64: ${FIREBASE_SERVICE_ACCOUNT_BASE64}
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/tmp/fake-firebase.json}
     depends_on:
       postgres-core:

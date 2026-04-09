@@ -9,6 +9,7 @@ import { userRoutes } from './routes/users'
 import { locationRoutes } from './routes/locations'
 import { providerRoutes } from './routes/providers'
 import { bookingRoutes } from './routes/bookings'
+import { providerPortalRoutes } from './routes/provider-portal'
 
 // ── Startup env validation ───────────────────────────────────────────────────
 const REQUIRED_ENV = ['DATABASE_URL', 'REDIS_URL'] as const
@@ -41,6 +42,7 @@ const app = Fastify({
         ? { target: 'pino-pretty' }
         : undefined,
   },
+  bodyLimit: 10 * 1024 * 1024, // 10 MB — needed for base64 image data URIs from web clients
 })
 
 // ── Database ────────────────────────────────────────────────────────────────
@@ -64,8 +66,9 @@ app.register(publicAuthRoutes, { prefix: '/v1/auth' })
 app.register(authRoutes, { prefix: '/v1/auth' })
 app.register(userRoutes, { prefix: '/v1/users' })
 app.register(locationRoutes, { prefix: '/v1/locations' })
-app.register(providerRoutes, { prefix: '/v1/providers' })
-app.register(bookingRoutes,  { prefix: '/v1/bookings' })
+app.register(providerRoutes,       { prefix: '/v1/providers' })
+app.register(bookingRoutes,        { prefix: '/v1/bookings' })
+app.register(providerPortalRoutes, { prefix: '/v1/provider' })
 
 app.get('/health', async () => ({
   status: 'ok',

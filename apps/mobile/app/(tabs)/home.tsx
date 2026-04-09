@@ -13,7 +13,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { useAuth } from '../../lib/auth-context'
 import { LocationAPI, ProvidersAPI, City, Area, Provider } from '../../lib/api'
 
-const LOGO = require('../../assets/images/logo_pure.jpeg')
+const LOGO = require('../../assets/images/logo_pure.png')
 
 type MCIcon = React.ComponentProps<typeof MaterialCommunityIcons>['name']
 

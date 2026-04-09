@@ -14,7 +14,7 @@ import { Link, useRouter } from 'expo-router'
 import { useState } from 'react'
 import { useAuth } from '../../lib/auth-context'
 
-const LOGO = require('../../assets/images/logo_pure.jpeg')
+const LOGO = require('../../assets/images/logo_pure.png')
 
 export default function RegisterScreen() {
   const { register } = useAuth()

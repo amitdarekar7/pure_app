@@ -86,6 +86,73 @@ export const BookingsAPI = {
     _auth<{ bookings: BookingSummary[] }>('GET', `${CORE}/v1/bookings/my`),
 }
 
+// ─── Provider Portal API (provider-authenticated) ────────────────────────────
+export const ProviderPortalAPI = {
+  register: (p: {
+    providerName: string
+    address?:     string
+    cityId:       string
+    phone?:       string
+    displayName?: string
+  }) => _auth<{ userId: string; providerId: string }>('POST', `${CORE}/v1/provider/register`, p),
+
+  me: () =>
+    _auth<{ provider: ProviderProfile; services: ProviderService[]; stats: ProviderStats }>(
+      'GET', `${CORE}/v1/provider/me`,
+    ),
+
+  bookings: (status?: string) =>
+    _auth<{ bookings: ProviderBooking[] }>(
+      'GET',
+      `${CORE}/v1/provider/bookings${status ? `?status=${encodeURIComponent(status)}` : ''}`,
+    ),
+
+  updateBooking: (id: string, action: 'confirm' | 'reject' | 'reschedule', scheduledAt?: string) =>
+    _auth<{ booking: Booking }>('PATCH', `${CORE}/v1/provider/bookings/${encodeURIComponent(id)}`, {
+      action,
+      scheduledAt,
+    }),
+
+  availability: () =>
+    _auth<{ availability: AvailabilitySlot[] }>('GET', `${CORE}/v1/provider/availability`),
+
+  setAvailability: (schedule: AvailabilitySlot[]) =>
+    _auth<{ ok: boolean }>('PUT', `${CORE}/v1/provider/availability`, { schedule }),
+
+  getServiceImages: (serviceId: string) =>
+    _auth<{ images: ServiceImage[] }>(
+      'GET',
+      `${CORE}/v1/provider/services/${encodeURIComponent(serviceId)}/images`,
+    ),
+
+  addServiceImage: (serviceId: string, imageUrl: string, sortOrder?: number) =>
+    _auth<{ image: ServiceImage }>(
+      'POST',
+      `${CORE}/v1/provider/services/${encodeURIComponent(serviceId)}/images`,
+      { imageUrl, sortOrder },
+    ),
+
+  deleteServiceImage: (serviceId: string, imageId: string) =>
+    _auth<{ ok: boolean }>(
+      'DELETE',
+      `${CORE}/v1/provider/services/${encodeURIComponent(serviceId)}/images/${encodeURIComponent(imageId)}`,
+    ),
+
+  toggleService: (serviceId: string, isAvailable: boolean) =>
+    _auth<{ ok: boolean }>(
+      'PATCH',
+      `${CORE}/v1/provider/services/${encodeURIComponent(serviceId)}`,
+      { isAvailable },
+    ),
+
+  createService: (p: { categorySlug: string; title: string; pricePaise: number; durationMins: number }) =>
+    _auth<{ service: ProviderService }>(
+      'POST',
+      `${CORE}/v1/provider/services`,
+      p,
+    ),
+}
+
 // ─── AI API ───────────────────────────────────────────────────────────────────
 export const AIAPI = {
   recommendations: (userId: string, context = 'home', limit = 10) =>
@@ -201,6 +268,56 @@ export interface BookingSummary {
   scheduled_at:  string
   status:        string
   price_paise:   number
+}
+
+export interface ProviderProfile {
+  id:      string
+  name:    string
+  address: string | null
+  phone:   string | null
+  status:  string
+}
+
+export interface ProviderService {
+  id:            string
+  category_slug: string
+  title:         string
+  price_paise:   number
+  duration_mins: number
+  is_available:  boolean
+}
+
+export interface ProviderStats {
+  pending:   string
+  confirmed: string
+  today:     string
+}
+
+export interface ProviderBooking {
+  id:            string
+  user_name:     string | null
+  user_email:    string
+  user_phone:    string | null
+  service_title: string
+  scheduled_at:  string
+  status:        string
+  price_paise:   number
+  notes:         string | null
+  created_at:    string
+}
+
+export interface AvailabilitySlot {
+  dayOfWeek:  number
+  openTime:   string
+  closeTime:  string
+  isClosed:   boolean
+}
+
+export interface ServiceImage {
+  id:         string
+  image_url:  string
+  sort_order: number
+  created_at: string
 }
 
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────

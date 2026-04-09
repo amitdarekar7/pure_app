@@ -15,7 +15,7 @@ import { useState } from 'react'
 import { sendPasswordResetEmail } from 'firebase/auth'
 import { firebaseAuth } from '../../lib/firebase'
 
-const LOGO = require('../../assets/images/logo_pure.jpeg')
+const LOGO = require('../../assets/images/logo_pure.png')
 
 export default function ForgotPasswordScreen() {
   const router = useRouter()
