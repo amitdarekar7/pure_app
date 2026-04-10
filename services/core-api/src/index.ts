@@ -2,6 +2,7 @@ import 'dotenv/config'
 import Fastify from 'fastify'
 import fastifyCors from '@fastify/cors'
 import fastifyRedis from '@fastify/redis'
+import Redis from 'ioredis'
 import { Pool } from 'pg'
 import { getFirebaseAdmin } from './firebase-admin'
 import { authRoutes, publicAuthRoutes } from './routes/auth'
@@ -10,6 +11,9 @@ import { locationRoutes } from './routes/locations'
 import { providerRoutes } from './routes/providers'
 import { bookingRoutes } from './routes/bookings'
 import { providerPortalRoutes } from './routes/provider-portal'
+import { eventStreamRoutes } from './routes/events'
+import { connectProducer, disconnectProducer } from './kafka/producer'
+import { startConsumer, stopConsumer } from './kafka/consumer'
 
 // ── Startup env validation ───────────────────────────────────────────────────
 const REQUIRED_ENV = ['DATABASE_URL', 'REDIS_URL'] as const
@@ -62,24 +66,58 @@ app.register(fastifyRedis, {
 })
 
 // ── Routes ───────────────────────────────────────────────────────────────────
-app.register(publicAuthRoutes, { prefix: '/v1/auth' })
-app.register(authRoutes, { prefix: '/v1/auth' })
-app.register(userRoutes, { prefix: '/v1/users' })
-app.register(locationRoutes, { prefix: '/v1/locations' })
-app.register(providerRoutes,       { prefix: '/v1/providers' })
-app.register(bookingRoutes,        { prefix: '/v1/bookings' })
+app.register(publicAuthRoutes,  { prefix: '/v1/auth' })
+app.register(authRoutes,        { prefix: '/v1/auth' })
+app.register(userRoutes,        { prefix: '/v1/users' })
+app.register(locationRoutes,    { prefix: '/v1/locations' })
+app.register(providerRoutes,    { prefix: '/v1/providers' })
+app.register(bookingRoutes,     { prefix: '/v1/bookings' })
 app.register(providerPortalRoutes, { prefix: '/v1/provider' })
+app.register(eventStreamRoutes,    { prefix: '/v1/events' })
 
 app.get('/health', async () => ({
   status: 'ok',
   ts: new Date().toISOString(),
 }))
 
+// ── Kafka: connect producer + start consumer ─────────────────────────────────
+// The consumer needs a dedicated Redis client for pub/sub publishing.
+// It cannot share the one registered with @fastify/redis because that client
+// enters subscribe mode and can no longer issue regular commands.
+const redisPublisher = new Redis(process.env.REDIS_URL!)
+
+async function startKafka(): Promise<void> {
+  try {
+    await connectProducer()
+    app.log.info('[kafka] Producer connected')
+    await startConsumer(redisPublisher)
+    app.log.info('[kafka] Consumer started')
+  } catch (err) {
+    app.log.error({ err }, '[kafka] Failed to start — continuing without real-time events')
+  }
+}
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 const port = parseInt(process.env.PORT ?? '3000', 10)
-app.listen({ port, host: '0.0.0.0' }, (err) => {
+app.listen({ port, host: '0.0.0.0' }, async (err) => {
   if (err) {
     app.log.error(err)
     process.exit(1)
   }
+  // Start Kafka after the HTTP server is up so the health-check passes first
+  await startKafka()
 })
+
+// ── Graceful shutdown ─────────────────────────────────────────────────────────
+const shutdown = async (signal: string) => {
+  app.log.info(`[shutdown] ${signal} received`)
+  await Promise.allSettled([
+    disconnectProducer(),
+    stopConsumer(),
+    redisPublisher.quit(),
+  ])
+  process.exit(0)
+}
+process.once('SIGTERM', () => shutdown('SIGTERM'))
+process.once('SIGINT',  () => shutdown('SIGINT'))
+

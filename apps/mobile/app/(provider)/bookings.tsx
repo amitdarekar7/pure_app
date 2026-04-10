@@ -17,6 +17,7 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import { Ionicons } from '@expo/vector-icons'
 import { useProviderAuth } from '../../lib/provider-auth-context'
 import { ProviderPortalAPI, type ProviderBooking } from '../../lib/api'
+import { useEventStream, type BookingRequestedEvent } from '../../lib/use-event-stream'
 
 const LOGO = require('../../assets/images/logo_pure.png')
 
@@ -47,6 +48,20 @@ export default function ProviderBookingsScreen() {
   const [loading,     setLoading]     = useState(true)
   const [refreshing,  setRefreshing]  = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [newBookingBanner, setNewBookingBanner] = useState<string | null>(null)
+
+  // Real-time SSE: fires when a user places a booking with this provider
+  const { lastEvent } = useEventStream('provider')
+  useEffect(() => {
+    if (!lastEvent || lastEvent.event_type !== 'booking.requested') return
+    const ev = lastEvent as BookingRequestedEvent
+    setNewBookingBanner(`New booking from ${ev.data.user_name ?? 'a user'} for ${ev.data.service_title}`)
+    // Reload the list so the new booking appears immediately
+    load(filter)
+    // Auto-dismiss banner after 6 s
+    const t = setTimeout(() => setNewBookingBanner(null), 6_000)
+    return () => clearTimeout(t)
+  }, [lastEvent])
 
   // Reschedule modal state
   const [rescheduleId,  setRescheduleId]  = useState<string | null>(null)
@@ -111,6 +126,13 @@ export default function ProviderBookingsScreen() {
           </View>
         </View>
       </View>
+      {/* ── New booking banner ───────────────────────────────────── */}
+      {newBookingBanner ? (
+        <View style={styles.newBookingBanner}>
+          <Ionicons name="notifications" size={16} color="#fff" />
+          <Text style={styles.newBookingBannerText} numberOfLines={2}>{newBookingBanner}</Text>
+        </View>
+      ) : null}
       {/* Filter chips */}
       <ScrollView
         horizontal
@@ -269,6 +291,19 @@ export default function ProviderBookingsScreen() {
 const styles = StyleSheet.create({
   root:       { flex: 1, backgroundColor: '#f8f8f8' },
   centerWrap:  { flex: 1, width: '100%', maxWidth: 520, alignSelf: 'center' },
+
+  newBookingBanner: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    gap:            8,
+    backgroundColor: '#7c6af7',
+    marginHorizontal: 16,
+    marginBottom:   8,
+    borderRadius:   12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  newBookingBannerText: { color: '#fff', fontSize: 13, fontWeight: '600', flex: 1 },
   pageHeader: {
     flexDirection:  'row',
     justifyContent: 'space-between',

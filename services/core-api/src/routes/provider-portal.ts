@@ -1,5 +1,8 @@
 import { FastifyInstance } from 'fastify'
+import { randomUUID } from 'crypto'
 import { requireAuth } from '../middleware/auth'
+import { publish } from '../kafka/producer'
+import { TOPICS } from '../kafka/topics'
 
 /**
  * Provider Portal Routes — /v1/provider/*
@@ -324,20 +327,52 @@ export async function providerPortalRoutes(app: FastifyInstance) {
       }
 
       const { rows: updated } = await app.db.query<{
-        id:           string
-        status:       string
-        scheduled_at: string
+        id:            string
+        status:        string
+        scheduled_at:  string
+        user_id:       string
+        provider_name: string
+        service_title: string
       }>(
-        `UPDATE bookings
+        `UPDATE bookings b
             SET status       = $1,
                 scheduled_at = COALESCE($2::timestamptz, scheduled_at),
                 updated_at   = NOW()
-          WHERE id = $3
-          RETURNING id, status, scheduled_at`,
+          WHERE b.id = $3
+          RETURNING
+            b.id,
+            b.status,
+            b.scheduled_at,
+            b.user_id,
+            (SELECT p.name  FROM providers         p  WHERE p.id  = b.provider_id)         AS provider_name,
+            (SELECT ps.title FROM provider_services ps WHERE ps.id = b.provider_service_id) AS service_title`,
         [newStatus, newScheduledAt, id],
       )
 
-      return reply.send({ booking: updated[0] })
+      const booking = updated[0]
+
+      // ── Publish booking.responded event to Kafka (fire-and-forget) ──────
+      publish(TOPICS.BOOKING_RESPONDED, booking.id, {
+        event_id:       randomUUID(),
+        event_type:     TOPICS.BOOKING_RESPONDED,
+        schema_version: '1.0.0',
+        timestamp:      new Date().toISOString(),
+        aggregate_id:   booking.id,
+        data: {
+          booking_id:    booking.id,
+          user_id:       booking.user_id,
+          provider_id:   ctx.providerId,
+          provider_name: booking.provider_name,
+          action,
+          new_status:    booking.status,
+          scheduled_at:  booking.scheduled_at ?? null,
+          service_title: booking.service_title ?? null,
+        },
+      }).catch((err: Error) =>
+        app.log.error({ err }, '[kafka] Failed to publish booking.responded'),
+      )
+
+      return reply.send({ booking: { id: booking.id, status: booking.status, scheduled_at: booking.scheduled_at } })
     },
   )
 

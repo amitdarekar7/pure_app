@@ -23,6 +23,11 @@ const SEARCH  = localUrl(process.env.EXPO_PUBLIC_SEARCH_URL, 3001)
 const PAYMENT = localUrl(process.env.EXPO_PUBLIC_PAY_URL,    3002)
 const AI      = localUrl(process.env.EXPO_PUBLIC_AI_URL,     3003)
 
+/** Build the full SSE URL for /v1/events/stream with auth token + role */
+export function buildEventStreamUrl(token: string, role: 'user' | 'provider'): string {
+  return `${CORE}/v1/events/stream?token=${encodeURIComponent(token)}&role=${role}`
+}
+
 // ─── Auth API ─────────────────────────────────────────────────────────────────
 export const AuthAPI = {
   // Called after Firebase registration to provision the user record in our DB

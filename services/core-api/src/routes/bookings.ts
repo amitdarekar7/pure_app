@@ -1,5 +1,8 @@
 import { FastifyInstance } from 'fastify'
+import { randomUUID } from 'crypto'
 import { requireAuth } from '../middleware/auth'
+import { publish } from '../kafka/producer'
+import { TOPICS } from '../kafka/topics'
 
 export async function bookingRoutes(app: FastifyInstance) {
   /**
@@ -27,21 +30,29 @@ export async function bookingRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'scheduledAt must be a future ISO date' })
       }
 
-      // Resolve DB user_id from firebase_uid
-      const { rows: uRows } = await app.db.query<{ id: string }>(
-        `SELECT id FROM users WHERE firebase_uid = $1`,
+      // Resolve DB user_id from firebase_uid, including profile for event enrichment
+      const { rows: uRows } = await app.db.query<{
+        id:           string
+        phone:        string | null
+        display_name: string | null
+      }>(
+        `SELECT u.id, u.phone, pr.display_name
+           FROM users u
+           LEFT JOIN profiles pr ON pr.user_id = u.id
+          WHERE u.firebase_uid = $1`,
         [req.firebaseUid],
       )
       if (!uRows[0]) return reply.status(401).send({ error: 'user not found' })
       const userId = uRows[0].id
 
-      // Look up the service to get provider_id and price
+      // Look up the service to get provider_id, price, and title for event enrichment
       const { rows: sRows } = await app.db.query<{
         provider_id:  string
         price_paise:  number
         is_available: boolean
+        title:        string
       }>(
-        `SELECT provider_id, price_paise, is_available
+        `SELECT provider_id, price_paise, is_available, title
          FROM provider_services
          WHERE id = $1`,
         [providerServiceId],
@@ -49,7 +60,7 @@ export async function bookingRoutes(app: FastifyInstance) {
       if (!sRows[0]) return reply.status(404).send({ error: 'service not found' })
       if (!sRows[0].is_available) return reply.status(409).send({ error: 'service not available' })
 
-      const { provider_id, price_paise } = sRows[0]
+      const { provider_id, price_paise, title: serviceTitle } = sRows[0]
 
       const { rows } = await app.db.query<{ id: string; status: string; scheduled_at: string }>(
         `INSERT INTO bookings
@@ -59,7 +70,31 @@ export async function bookingRoutes(app: FastifyInstance) {
         [userId, provider_id, providerServiceId, scheduled.toISOString(), price_paise, notes ?? null],
       )
 
-      return reply.status(201).send({ booking: rows[0] })
+      const booking = rows[0]
+
+      // ── Publish booking.requested event to Kafka (fire-and-forget) ──────
+      publish(TOPICS.BOOKING_REQUESTED, booking.id, {
+        event_id:       randomUUID(),
+        event_type:     TOPICS.BOOKING_REQUESTED,
+        schema_version: '1.0.0',
+        timestamp:      new Date().toISOString(),
+        aggregate_id:   booking.id,
+        data: {
+          booking_id:    booking.id,
+          user_id:       userId,
+          provider_id,
+          service_title: serviceTitle,
+          scheduled_at:  booking.scheduled_at,
+          price_paise,
+          notes:         notes ?? null,
+          user_name:     uRows[0].display_name ?? null,
+          user_phone:    uRows[0].phone ?? null,
+        },
+      }).catch((err: Error) =>
+        app.log.error({ err }, '[kafka] Failed to publish booking.requested'),
+      )
+
+      return reply.status(201).send({ booking })
     },
   )
 

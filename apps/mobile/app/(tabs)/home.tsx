@@ -1,4 +1,5 @@
 import {
+  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -7,13 +8,26 @@ import {
   TextInput,
   View,
 } from 'react-native'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'expo-router'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { useAuth } from '../../lib/auth-context'
-import { LocationAPI, ProvidersAPI, City, Area, Provider } from '../../lib/api'
+import { LocationAPI, ProvidersAPI, BookingsAPI, City, Area, Provider, BookingSummary } from '../../lib/api'
+import { useEventStream, type BookingRespondedEvent } from '../../lib/use-event-stream'
 
 const LOGO = require('../../assets/images/logo_pure.png')
+
+const MONTHS_S = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const DAYS_S   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+
+const BOOKING_STATUS_META: Record<string, { label: string; color: string; bg: string; icon: string }> = {
+  confirmed:  { label: 'Confirmed',  color: '#065f46', bg: '#d1fae5', icon: 'checkmark-circle' },
+  pending:    { label: 'Pending',    color: '#92400e', bg: '#fef3c7', icon: 'time-outline' },
+  cancelled:  { label: 'Cancelled',  color: '#991b1b', bg: '#fee2e2', icon: 'close-circle' },
+  rejected:   { label: 'Rejected',   color: '#991b1b', bg: '#fee2e2', icon: 'close-circle' },
+  completed:  { label: 'Completed',  color: '#1e3a5f', bg: '#dbeafe', icon: 'ribbon-outline' },
+  _default:   { label: 'Pending',    color: '#92400e', bg: '#fef3c7', icon: 'time-outline' },
+}
 
 type MCIcon = React.ComponentProps<typeof MaterialCommunityIcons>['name']
 
@@ -35,6 +49,7 @@ const SERVICES: { id: string; icon: MCIcon; label: string; sub: string; bg: stri
 export default function HomeScreen() {
   const { user }   = useAuth()
   const router     = useRouter()
+  const scrollRef  = useRef<ScrollView>(null)
 
   // ── Location state ──────────────────────────────────────────────────────
   const [cities,      setCities]      = useState<City[]>([])
@@ -59,6 +74,44 @@ export default function HomeScreen() {
   const [loadingProviders, setLoadingProviders]  = useState(false)
   const [searched,         setSearched]          = useState(false)
   const [likedIds,         setLikedIds]          = useState<Set<string>>(new Set())
+  const [bookingBanner,    setBookingBanner]      = useState<{ text: string; ok: boolean } | null>(null)
+  const [recentBookings,   setRecentBookings]     = useState<BookingSummary[]>([])
+  const [bookingsLoading,  setBookingsLoading]    = useState(false)
+
+  // Fetch last 3 bookings whenever user is signed in
+  const fetchRecentBookings = useCallback(async () => {
+    if (!user) { setRecentBookings([]); return }
+    setBookingsLoading(true)
+    try {
+      const { bookings } = await BookingsAPI.my()
+      setRecentBookings(bookings.slice(0, 3))
+    } catch { /* ignore */ }
+    finally { setBookingsLoading(false) }
+  }, [user])
+
+  useEffect(() => { fetchRecentBookings() }, [fetchRecentBookings])
+
+  // Real-time SSE: fires when a provider responds to this user's booking
+  const { lastEvent } = useEventStream('user')
+  useEffect(() => {
+    if (!lastEvent || lastEvent.event_type !== 'booking.responded') return
+    const ev = lastEvent as BookingRespondedEvent
+    const ok = ev.data.action === 'confirm'
+    const text = ok
+      ? `${ev.data.provider_name} confirmed your booking for ${ev.data.service_title ?? 'your service'}!`
+      : ev.data.action === 'reschedule'
+        ? `${ev.data.provider_name} rescheduled your booking.`
+        : `${ev.data.provider_name} cancelled your booking for ${ev.data.service_title ?? 'your service'}.`
+    // ① persistent 8-second banner in the page
+    setBookingBanner({ text, ok })
+    const t = setTimeout(() => setBookingBanner(null), 8_000)
+    // ② native alert for immediate attention even when app is in background
+    const alertTitle = ok ? '🎉 Booking Confirmed!' : ev.data.action === 'reschedule' ? '📅 Booking Rescheduled' : '❌ Booking Cancelled'
+    Alert.alert(alertTitle, text, [{ text: 'OK' }])
+    // ③ refresh the widget cards in the background
+    fetchRecentBookings()
+    return () => clearTimeout(t)
+  }, [lastEvent, fetchRecentBookings])
 
   useEffect(() => {
     // Remove browser focus outline on web inputs
@@ -161,6 +214,7 @@ export default function HomeScreen() {
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.root}
       contentContainerStyle={styles.scroll}
       showsVerticalScrollIndicator={false}
@@ -522,16 +576,63 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* ── Logged-in strip ──────────────────────────────────── */}
+        {/* ── My Bookings widget ───────────────────────────────── */}
         {user && !searched && (
-          <View style={styles.welcomeStrip}>
-            <View style={styles.welcomeLeft}>
-              <Text style={styles.welcomeHi}>👋 Hey {user.display_name?.split(' ')[0] ?? 'there'}!</Text>
-              <Text style={styles.welcomeSub}>Ready for your next appointment?</Text>
+          <View style={styles.bwWidget}>
+            <View style={styles.bwHeader}>
+              <View style={styles.bwTitleRow}>
+                <Ionicons name="calendar" size={16} color="#7c6af7" />
+                <Text style={styles.bwTitle}>My Bookings</Text>
+              </View>
+              <Pressable onPress={() => router.push('/(tabs)/bookings')} style={styles.bwViewAll}>
+                <Text style={styles.bwViewAllText}>View All</Text>
+                <Ionicons name="chevron-forward" size={13} color="#7c6af7" />
+              </Pressable>
             </View>
-            <Pressable onPress={() => router.push('/(tabs)/search')} style={styles.welcomeCta}>
-              <Text style={styles.welcomeCtaText}>Book Now</Text>
-            </Pressable>
+
+            {/* Real-time notification strip */}
+            {bookingBanner && (
+              <View style={[styles.bwBanner, bookingBanner.ok ? styles.bwBannerOk : styles.bwBannerCancel]}>
+                <Ionicons name={bookingBanner.ok ? 'checkmark-circle' : 'close-circle'} size={15} color="#fff" />
+                <Text style={styles.bwBannerText} numberOfLines={2}>{bookingBanner.text}</Text>
+              </View>
+            )}
+
+            {bookingsLoading ? (
+              <View style={styles.bwEmpty}>
+                <Text style={styles.bwEmptyText}>Loading…</Text>
+              </View>
+            ) : recentBookings.length === 0 ? (
+              <View style={styles.bwEmpty}>
+                <Ionicons name="calendar-outline" size={28} color="#ddd" />
+                <Text style={styles.bwEmptyText}>No bookings yet</Text>
+                <Pressable onPress={() => scrollRef.current?.scrollTo({ y: 0, animated: true })} style={styles.bwBookNowBtn}>
+                  <Text style={styles.bwBookNowText}>Book a service</Text>
+                </Pressable>
+              </View>
+            ) : (
+              recentBookings.map(b => {
+                const meta = BOOKING_STATUS_META[b.status] ?? BOOKING_STATUS_META._default
+                const d    = new Date(b.scheduled_at)
+                const dateStr = `${DAYS_S[d.getDay()]}, ${d.getDate()} ${MONTHS_S[d.getMonth()]} · ${d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`
+                return (
+                  <View key={b.id} style={styles.bwCard}>
+                    <View style={styles.bwCardLeft}>
+                      <Text style={styles.bwCardProvider} numberOfLines={1}>{b.provider_name}</Text>
+                      <Text style={styles.bwCardService} numberOfLines={1}>{b.service_title}</Text>
+                      <Text style={styles.bwCardDate}>{dateStr}</Text>
+                    </View>
+                    <View style={styles.bwCardRight}>
+                      <View style={[styles.bwBadge, { backgroundColor: meta.bg }]}>
+                        <Ionicons name={meta.icon as any} size={11} color={meta.color} />
+                        <Text style={[styles.bwBadgeText, { color: meta.color }]}>{meta.label}</Text>
+                      </View>
+                      <Text style={styles.bwCardPrice}>₹{Math.round(b.price_paise / 100)}</Text>
+                    </View>
+                  </View>
+                )
+              })
+            )}
           </View>
         )}
 
@@ -602,6 +703,8 @@ const styles = StyleSheet.create({
     paddingVertical:    7,
   },
   loginBtnText: { color: '#7c6af7', fontWeight: '700', fontSize: 13 },
+
+  // (SSE booking banner styles now in bwBanner* below)
 
   // ── Section header ─────────────────────────────────────────────────
   sectionRow:   { marginBottom: 16 },
@@ -804,23 +907,81 @@ const styles = StyleSheet.create({
   providerEmptyTitle: { color: '#555', fontSize: 15, fontWeight: '700' },
   providerEmptyText: { color: '#bbb', fontSize: 13, textAlign: 'center' },
 
-  // ── Welcome strip ──────────────────────────────────────────────────
-  welcomeStrip: {
+  // ── My Bookings widget ────────────────────────────────────────────
+  bwWidget: {
+    backgroundColor: '#fff',
+    borderRadius:    16,
+    padding:         16,
+    marginTop:        4,
+    borderWidth:     1,
+    borderColor:     '#ebebf5',
+    shadowColor:     '#7c6af7',
+    shadowOffset:    { width: 0, height: 2 },
+    shadowOpacity:   0.06,
+    shadowRadius:    8,
+    elevation:       2,
+    gap:             10,
+  },
+  bwHeader: {
     flexDirection:   'row',
     alignItems:      'center',
-    backgroundColor: '#0f0f23',
-    borderRadius:    14,
-    padding:         16,
-    marginTop:       4,
+    justifyContent:  'space-between',
   },
-  welcomeLeft: { flex: 1 },
-  welcomeHi:   { color: '#fff', fontWeight: '700', fontSize: 15, marginBottom: 3 },
-  welcomeSub:  { color: '#888', fontSize: 12 },
-  welcomeCta: {
+  bwTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  bwTitle:    { fontSize: 15, fontWeight: '800', color: '#0f0f23' },
+  bwViewAll: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           2,
+  },
+  bwViewAllText: { fontSize: 12, fontWeight: '700', color: '#7c6af7' },
+
+  bwBanner: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               8,
+    borderRadius:      10,
+    paddingVertical:   8,
+    paddingHorizontal: 12,
+  },
+  bwBannerOk:     { backgroundColor: '#059669' },
+  bwBannerCancel: { backgroundColor: '#dc2626' },
+  bwBannerText:   { color: '#fff', fontSize: 12, fontWeight: '600', flex: 1 },
+
+  bwEmpty: { alignItems: 'center', paddingVertical: 16, gap: 6 },
+  bwEmptyText: { color: '#bbb', fontSize: 13 },
+  bwBookNowBtn: {
     backgroundColor:   '#7c6af7',
     borderRadius:      10,
-    paddingHorizontal: 16,
-    paddingVertical:    9,
+    paddingHorizontal: 18,
+    paddingVertical:    8,
+    marginTop:          4,
   },
-  welcomeCtaText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  bwBookNowText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+
+  bwCard: {
+    flexDirection:   'row',
+    alignItems:      'flex-start',
+    justifyContent:  'space-between',
+    gap:             10,
+    paddingTop:       8,
+    borderTopWidth:  1,
+    borderTopColor:  '#f2f2f8',
+  },
+  bwCardLeft:    { flex: 1 },
+  bwCardRight:   { alignItems: 'flex-end', gap: 4 },
+  bwCardProvider: { fontSize: 13, fontWeight: '700', color: '#111827' },
+  bwCardService:  { fontSize: 12, color: '#6b7280', marginTop: 1 },
+  bwCardDate:     { fontSize: 11, color: '#9ca3af', marginTop: 3 },
+  bwCardPrice:    { fontSize: 13, fontWeight: '700', color: '#7c6af7' },
+
+  bwBadge: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               3,
+    paddingHorizontal: 7,
+    paddingVertical:   3,
+    borderRadius:      20,
+  },
+  bwBadgeText: { fontSize: 10, fontWeight: '700' },
 })

@@ -45,6 +45,14 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="bookings"
+        options={{
+          title:       'My Bookings',
+          tabBarLabel: 'Bookings',
+          tabBarIcon:  ({ color }) => <TabIcon name="calendar-outline" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="payments"
         options={{
           title:       'Payments',

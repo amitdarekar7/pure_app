@@ -168,7 +168,20 @@ export default function ProviderBookingPage() {
     setWeekMonday(addDays(weekMonday, 7))
   }
 
-  const timeSlots = provider ? buildTimeSlots(provider.duration_mins) : []
+  const now = new Date()
+  const isToday = selectedDate.toDateString() === now.toDateString()
+  const timeSlots = provider
+    ? buildTimeSlots(provider.duration_mins).filter(slot => {
+        if (!isToday) return true
+        const [timePart, suffix] = slot.split(' ')
+        let [h, m] = timePart.split(':').map(Number)
+        if (suffix === 'PM' && h !== 12) h += 12
+        if (suffix === 'AM' && h === 12) h = 0
+        const slotTime = new Date(selectedDate)
+        slotTime.setHours(h, m, 0, 0)
+        return slotTime > now
+      })
+    : []
 
   // ── submit booking ──
   const handleBook = useCallback(async () => {
@@ -237,8 +250,8 @@ export default function ProviderBookingPage() {
           <Text style={styles.successNote}>
             The provider will confirm your booking soon.
           </Text>
-          <Pressable style={styles.doneBtn} onPress={() => router.back()}>
-            <Text style={styles.doneBtnText}>Done</Text>
+          <Pressable style={styles.doneBtn} onPress={() => router.replace('/(tabs)/bookings' as any)}>
+            <Text style={styles.doneBtnText}>View My Bookings</Text>
           </Pressable>
         </View>
       </View>

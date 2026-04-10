@@ -16,8 +16,6 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
-// Ensure the hoisted expo-router entry resolves without a ../../ prefix
-// by adding the workspace root as an extra node_modules location
 config.resolver.disableHierarchicalLookup = false;
 
 module.exports = config;

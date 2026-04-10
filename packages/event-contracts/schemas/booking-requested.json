@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://pure-app.io/events/booking-requested/v1",
+  "title": "BookingRequested",
+  "description": "Emitted by core-api when a user creates a new booking. Consumers: core-api (SSE fan-out to provider app).",
+  "type": "object",
+  "required": ["event_id", "event_type", "schema_version", "timestamp", "aggregate_id", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "event_id":       { "type": "string", "format": "uuid" },
+    "event_type":     { "type": "string", "const": "booking.requested" },
+    "schema_version": { "type": "string", "const": "1.0.0" },
+    "timestamp":      { "type": "string", "format": "date-time" },
+    "aggregate_id":   { "type": "string", "format": "uuid", "description": "booking_id" },
+    "data": {
+      "type": "object",
+      "required": [
+        "booking_id", "user_id", "provider_id",
+        "service_title", "scheduled_at", "price_paise"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "booking_id":    { "type": "string", "format": "uuid" },
+        "user_id":       { "type": "string", "format": "uuid" },
+        "provider_id":   { "type": "string", "format": "uuid" },
+        "service_title": { "type": "string" },
+        "scheduled_at":  { "type": "string", "format": "date-time" },
+        "price_paise":   { "type": "integer", "minimum": 0 },
+        "notes":         { "type": ["string", "null"] },
+        "user_name":     { "type": ["string", "null"] },
+        "user_phone":    { "type": ["string", "null"] }
+      }
+    }
+  }
+}
