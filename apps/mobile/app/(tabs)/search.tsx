@@ -1,11 +1,13 @@
 import {
   ActivityIndicator,
   FlatList,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native'
 import { useState } from 'react'
 import { SearchAPI } from '../../lib/api'
@@ -22,6 +24,9 @@ function formatPrice(paise: number | undefined): string {
 }
 
 export default function SearchScreen() {
+  const { width } = useWindowDimensions()
+  const maxW = width >= 1024 ? 760 : width >= 768 ? 640 : width >= 480 ? 520 : '100%'
+
   const [query,   setQuery]   = useState('')
   const [results, setResults] = useState<SearchHit[]>([])
   const [total,   setTotal]   = useState(0)
@@ -49,6 +54,7 @@ export default function SearchScreen() {
 
   return (
     <View style={styles.container}>
+      <View style={[styles.innerWrap, { maxWidth: maxW }]}>
       {/* Search bar */}
       <View style={styles.inputRow}>
         <TextInput
@@ -138,12 +144,14 @@ export default function SearchScreen() {
           contentContainerStyle={results.length === 0 && searched ? { flex: 1 } : undefined}
         />
       )}
+      </View>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  container:   { flex: 1, backgroundColor: '#0f0f23', padding: 16 },
+  container: { flex: 1, backgroundColor: '#0f0f23', paddingTop: Platform.OS === 'ios' ? 54 : 16, alignItems: 'center' },
+  innerWrap: { flex: 1, width: '100%', padding: 16, paddingTop: 0 },
 
   inputRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   input: {

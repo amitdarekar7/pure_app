@@ -684,7 +684,7 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 11, color: GREY, fontWeight: '600' },
 
   // ── List ──
-  list: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40 },
+  list: { paddingTop: 12, paddingBottom: 40 },
 
   emptyCard: {
     backgroundColor: '#fff',

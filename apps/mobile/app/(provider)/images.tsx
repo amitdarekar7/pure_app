@@ -1,8 +1,8 @@
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Image,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -131,28 +131,26 @@ export default function ImagesScreen() {
   }
 
   // ── Delete image ──────────────────────────────────────────────────────────
+  const [deleting, setDeleting] = useState<string | null>(null) // imageId being deleted
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null) // imageId pending confirm
+
   async function deleteImage(serviceId: string, imageId: string) {
-    Alert.alert('Delete Photo', 'Remove this photo?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await ProviderPortalAPI.deleteServiceImage(serviceId, imageId)
-            setServices((prev) =>
-              prev.map((s) =>
-                s.service.id === serviceId
-                  ? { ...s, images: s.images.filter((img) => img.id !== imageId) }
-                  : s,
-              ),
-            )
-          } catch {
-            Alert.alert('Error', 'Failed to delete image.')
-          }
-        },
-      },
-    ])
+    setDeleting(imageId)
+    try {
+      await ProviderPortalAPI.deleteServiceImage(serviceId, imageId)
+      setServices((prev) =>
+        prev.map((s) =>
+          s.service.id === serviceId
+            ? { ...s, images: s.images.filter((img) => img.id !== imageId) }
+            : s,
+        ),
+      )
+    } catch {
+      Alert.alert('Error', 'Failed to delete image.')
+    } finally {
+      setDeleting(null)
+      setConfirmDelete(null)
+    }
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -224,10 +222,10 @@ export default function ImagesScreen() {
                     <View style={styles.emojiCircle}>
                       <Text style={styles.emojiText}>{emoji}</Text>
                     </View>
-                    <View>
+                    <View style={{ flex: 1 }}>
                       <Text style={styles.serviceName}>{service.title}</Text>
                       <Text style={styles.serviceMeta}>
-                        {service.category_slug} · {images.length} photo{images.length !== 1 ? 's' : ''}
+                        {images.length} photo{images.length !== 1 ? 's' : ''} uploaded
                       </Text>
                     </View>
                   </View>
@@ -243,30 +241,75 @@ export default function ImagesScreen() {
                   </Pressable>
                 </View>
 
-                {/* Images grid */}
+                {/* Photos grid */}
                 {images.length > 0 ? (
-                  <FlatList
-                    data={images}
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.imageList}
-                    keyExtractor={(img) => img.id}
-                    renderItem={({ item: img }) => (
-                      <View style={styles.imageCard}>
-                        <Image source={{ uri: img.image_url }} style={styles.imageThumb} />
-                        <Pressable
-                          style={styles.deleteBtn}
-                          onPress={() => deleteImage(service.id, img.id)}
-                        >
-                          <Text style={styles.deleteBtnText}>✕</Text>
-                        </Pressable>
-                      </View>
-                    )}
-                  />
-                ) : (
-                  <View style={styles.noPhotos}>
-                    <Text style={styles.noPhotosText}>No photos yet — tap "+ Add Photo" above</Text>
+                  <View style={styles.photosGrid}>
+                    {images.map((img) => {
+                      const isConfirming = confirmDelete === img.id
+                      const isDeletingThis = deleting === img.id
+                      return (
+                        <View key={img.id} style={styles.photoItem}>
+                          <Image source={{ uri: img.image_url }} style={styles.photoThumb} />
+                          {isConfirming ? (
+                            <View style={styles.confirmRow}>
+                              <Pressable
+                                style={styles.confirmYes}
+                                onPress={() => deleteImage(service.id, img.id)}
+                              >
+                                {isDeletingThis ? (
+                                  <ActivityIndicator size="small" color="#fff" />
+                                ) : (
+                                  <Text style={styles.confirmYesText}>Remove</Text>
+                                )}
+                              </Pressable>
+                              <Pressable
+                                style={styles.confirmNo}
+                                onPress={() => setConfirmDelete(null)}
+                              >
+                                <Text style={styles.confirmNoText}>Cancel</Text>
+                              </Pressable>
+                            </View>
+                          ) : (
+                            <Pressable
+                              style={styles.removeBtn}
+                              onPress={() => setConfirmDelete(img.id)}
+                            >
+                              <Text style={styles.removeBtnText}>🗑  Remove</Text>
+                            </Pressable>
+                          )}
+                        </View>
+                      )
+                    })}
+                    {/* Add-more placeholder */}
+                    <Pressable
+                      style={styles.addMoreCard}
+                      onPress={() => !isUploading && pickImage(service.id)}
+                    >
+                      {isUploading ? (
+                        <ActivityIndicator size="small" color={ACCENT} />
+                      ) : (
+                        <>
+                          <Text style={styles.addMoreIcon}>📷</Text>
+                          <Text style={styles.addMoreText}>Add Photo</Text>
+                        </>
+                      )}
+                    </Pressable>
                   </View>
+                ) : (
+                  <Pressable
+                    style={styles.emptyPhotos}
+                    onPress={() => !isUploading && pickImage(service.id)}
+                  >
+                    {isUploading ? (
+                      <ActivityIndicator size="small" color={ACCENT} />
+                    ) : (
+                      <>
+                        <Text style={styles.emptyPhotosIcon}>📷</Text>
+                        <Text style={styles.emptyPhotosTitle}>No photos yet</Text>
+                        <Text style={styles.emptyPhotosHint}>Tap here to add your first photo</Text>
+                      </>
+                    )}
+                  </Pressable>
                 )}
               </View>
             )
@@ -333,7 +376,6 @@ const styles = StyleSheet.create({
   // ── Empty ──
   emptyCard: {
     backgroundColor: '#fff',
-    marginHorizontal: 16,
     borderRadius: 16,
     padding: 30,
     alignItems: 'center',
@@ -352,7 +394,6 @@ const styles = StyleSheet.create({
   // ── Service card ──
   serviceCard: {
     backgroundColor: '#fff',
-    marginHorizontal: 16,
     marginBottom: 14,
     borderRadius: 16,
     overflow: 'hidden',
@@ -364,6 +405,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
   },
   serviceLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   emojiCircle: {
@@ -379,7 +422,7 @@ const styles = StyleSheet.create({
   serviceMeta: { fontSize: 11, color: GREY, marginTop: 2 },
   uploadBtn: {
     backgroundColor: ACCENT,
-    borderRadius: 8,
+    borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: 14,
     minWidth: 100,
@@ -388,32 +431,79 @@ const styles = StyleSheet.create({
   uploadBtnDisabled: { opacity: 0.6 },
   uploadBtnText: { color: '#fff', fontWeight: '800', fontSize: 12 },
 
-  // ── Image list ──
-  imageList: { paddingHorizontal: 14, paddingBottom: 14, gap: 10 },
-  imageCard: { position: 'relative' },
-  imageThumb: {
-    width: 110,
-    height: 110,
+  // ── Photos grid ──
+  photosGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    padding: 10,
+    gap: 10,
+  },
+  photoItem: {
+    width: 150,
     borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  photoThumb: {
+    width: '100%',
+    height: 140,
     backgroundColor: '#f3f3f3',
   },
-  deleteBtn: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    width: 24,
-    height: 24,
+  removeBtn: {
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  removeBtnText: {
+    fontSize: 12,
+    color: '#EF4444',
+    fontWeight: '700',
+  },
+  confirmRow: {
+    flexDirection: 'row',
+    gap: 0,
+  },
+  confirmYes: {
+    flex: 1,
+    backgroundColor: '#EF4444',
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  confirmYesText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  confirmNo: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  confirmNoText: { color: GREY, fontSize: 12, fontWeight: '700' },
+
+  // ── Add-more card ──
+  addMoreCard: {
+    width: 150,
+    height: 180,
     borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#FAFAFA',
   },
-  deleteBtnText: { color: '#fff', fontSize: 12, fontWeight: '900' },
+  addMoreIcon: { fontSize: 28, marginBottom: 6 },
+  addMoreText: { fontSize: 12, fontWeight: '700', color: ACCENT },
 
-  // ── No photos ──
-  noPhotos: {
-    paddingHorizontal: 14,
-    paddingBottom: 14,
+  // ── Empty photos ──
+  emptyPhotos: {
+    alignItems: 'center',
+    paddingVertical: 28,
+    paddingHorizontal: 20,
+    borderTopWidth: 1,
+    borderTopColor: BORDER,
+    backgroundColor: '#FAFBFC',
   },
-  noPhotosText: { fontSize: 12, color: GREY, fontStyle: 'italic' },
+  emptyPhotosIcon: { fontSize: 32, marginBottom: 8 },
+  emptyPhotosTitle: { fontSize: 14, fontWeight: '800', color: DARK, marginBottom: 4 },
+  emptyPhotosHint: { fontSize: 12, color: GREY },
 })

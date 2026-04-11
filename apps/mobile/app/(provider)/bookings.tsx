@@ -537,7 +537,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     backgroundColor: ACCENT,
-    marginHorizontal: 16,
+    marginHorizontal: 18,
     marginTop: 12,
     borderRadius: 14,
     paddingVertical: 12,
@@ -559,7 +559,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: BORDER,
   },
-  filtersRow: { paddingHorizontal: 16, paddingVertical: 10, gap: 8, alignItems: 'center' },
+  filtersRow: { paddingHorizontal: 18, paddingVertical: 10, gap: 8, alignItems: 'center' },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -576,11 +576,11 @@ const styles = StyleSheet.create({
   chipText: { color: GREY, fontSize: 13, fontWeight: '600' },
   chipTextActive: { color: '#fff', fontWeight: '800' },
 
-  countRow: { paddingHorizontal: 16, paddingVertical: 8 },
+  countRow: { paddingHorizontal: 18, paddingVertical: 8 },
   countText: { fontSize: 12, fontWeight: '700', color: GREY },
 
   // ── List ──
-  list: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 40 },
+  list: { paddingTop: 4, paddingBottom: 40 },
 
   emptyCard: {
     backgroundColor: '#fff',

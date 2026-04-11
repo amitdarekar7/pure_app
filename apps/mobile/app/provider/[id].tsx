@@ -108,8 +108,10 @@ export default function ProviderDetailPage() {
   }>()
   const router = useRouter()
   const { isSignedIn, isLoading: authLoading } = useAuth()
-  const { width } = useWindowDimensions()
-  const bannerRef = useRef<FlatList>(null)
+  const { width: screenWidth } = useWindowDimensions()
+  const MAX_CONTENT_W = 760
+  const contentW = Math.min(screenWidth, MAX_CONTENT_W)
+  const bannerRef = useRef<ScrollView>(null)
 
   const [provider, setProvider]       = useState<ProviderDetail | null>(null)
   const [services, setServices]       = useState<ProviderServiceItem[]>([])
@@ -118,8 +120,6 @@ export default function ProviderDetailPage() {
   const [loading, setLoading]         = useState(true)
   const [error, setError]             = useState<string | null>(null)
   const [activeBanner, setActiveBanner] = useState(0)
-
-  // selected service — default to the one from URL params, or first service
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(sid ?? null)
 
   // date/time/booking state
@@ -199,18 +199,20 @@ export default function ProviderDetailPage() {
     ? images.map(img => ({ uri: img.image_url }))
     : PLACEHOLDER_IMAGES
   const bannerCount = bannerImages.length
+  const activeBannerRef = useRef(0)
 
   useEffect(() => {
     if (bannerCount <= 1) return
     const interval = setInterval(() => {
-      setActiveBanner(prev => {
-        const next = (prev + 1) % bannerCount
-        bannerRef.current?.scrollToIndex({ index: next, animated: true })
-        return next
-      })
-    }, 3500)
+      const next = (activeBannerRef.current + 1) % bannerCount
+      activeBannerRef.current = next
+      setActiveBanner(next)
+      try {
+        bannerRef.current?.scrollTo({ x: next * contentW, animated: true })
+      } catch {}
+    }, 3000)
     return () => clearInterval(interval)
-  }, [bannerCount])
+  }, [bannerCount, contentW])
 
   // ── submit booking ──
   const handleBook = useCallback(async () => {
@@ -299,48 +301,53 @@ export default function ProviderDetailPage() {
   const location = [provider.area_name, provider.city_name].filter(Boolean).join(', ')
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  MAIN RENDER — Swiggy-inspired layout
+  //  MAIN RENDER — Swiggy Dineout–inspired layout
   // ═══════════════════════════════════════════════════════════════════════════
   return (
     <View style={styles.root}>
-      {/* ── sticky header ── */}
-      <View style={styles.header}>
-        <Pressable style={styles.headerBackBtn} onPress={() => router.back()}>
-          <Text style={styles.headerBackArrow}>←</Text>
-        </Pressable>
-        <View style={styles.headerInfo}>
-          <Text style={styles.headerName} numberOfLines={1}>{provider.name}</Text>
-          {location ? <Text style={styles.headerLocation} numberOfLines={1}>{location}</Text> : null}
-        </View>
-        <Pressable onPress={() => provider.phone && Linking.openURL(`tel:${provider.phone}`)}>
-          <Text style={styles.headerAction}>{provider.phone ? '📞' : ''}</Text>
-        </Pressable>
-      </View>
-
+      <View style={[styles.contentWrap, { maxWidth: MAX_CONTENT_W }]}>
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* ════════════════════════════════════════════════════════════════════
-            1. BANNER — Sliding hero images
+            1. HERO BANNER — Full-width sliding images with floating buttons
          ════════════════════════════════════════════════════════════════════ */}
         <View style={styles.bannerWrap}>
-          <FlatList
+          <ScrollView
             ref={bannerRef}
-            data={bannerImages}
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
-            keyExtractor={(_, i) => String(i)}
+            scrollEventThrottle={16}
             onMomentumScrollEnd={(e) => {
-              const idx = Math.round(e.nativeEvent.contentOffset.x / width)
+              const idx = Math.round(e.nativeEvent.contentOffset.x / contentW)
+              activeBannerRef.current = idx
               setActiveBanner(idx)
             }}
-            renderItem={({ item }) => (
+          >
+            {bannerImages.map((item, i) => (
               <Image
+                key={i}
                 source={typeof item === 'number' ? item : { uri: item.uri }}
-                style={[styles.bannerImage, { width }]}
+                style={[styles.bannerImage, { width: contentW }]}
                 resizeMode="cover"
               />
-            )}
-          />
+            ))}
+          </ScrollView>
+
+          {/* Floating back button */}
+          <Pressable style={styles.floatBack} onPress={() => router.back()}>
+            <Text style={styles.floatBackText}>←</Text>
+          </Pressable>
+
+          {/* Floating call button */}
+          {provider.phone && (
+            <Pressable
+              style={styles.floatCall}
+              onPress={() => Linking.openURL(`tel:${provider.phone}`)}
+            >
+              <Text style={styles.floatCallText}>📞</Text>
+            </Pressable>
+          )}
+
           {/* dot indicators */}
           {bannerCount > 1 && (
             <View style={styles.dotsRow}>
@@ -352,27 +359,29 @@ export default function ProviderDetailPage() {
           {/* image counter badge */}
           {bannerCount > 1 && (
             <View style={styles.imgCountBadge}>
-              <Text style={styles.imgCountText}>{activeBanner + 1}/{bannerCount}</Text>
+              <Text style={styles.imgCountText}>📷 {activeBanner + 1}/{bannerCount}</Text>
             </View>
           )}
         </View>
 
         {/* ════════════════════════════════════════════════════════════════════
-            2. PROVIDER INFO CARD
+            2. PROVIDER INFO CARD — overlaps the banner bottom
          ════════════════════════════════════════════════════════════════════ */}
         <View style={styles.infoCard}>
           <Text style={styles.providerName}>{provider.name}</Text>
-          <View style={styles.infoPills}>
-            {location ? <Text style={styles.infoLocation}>📍 {location}</Text> : null}
-            {provider.address ? <Text style={styles.infoAddress}>{provider.address}</Text> : null}
-          </View>
+          {location ? (
+            <View style={styles.infoLocationRow}>
+              <Text style={styles.infoLocationPin}>📍</Text>
+              <Text style={styles.infoLocation}>{location}</Text>
+            </View>
+          ) : null}
+          {provider.address ? <Text style={styles.infoAddress}>{provider.address}</Text> : null}
           <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>❤️ {provider.likes_count}</Text>
-              <Text style={styles.statLabel}>Likes</Text>
+            <View style={styles.likeBadge}>
+              <Text style={styles.likeText}>❤️ {provider.likes_count} Likes</Text>
             </View>
             {provider.is_featured && (
-              <View style={[styles.statItem, styles.featuredBadge]}>
+              <View style={styles.featuredBadge}>
                 <Text style={styles.featuredText}>⭐ Featured</Text>
               </View>
             )}
@@ -667,6 +676,7 @@ export default function ProviderDetailPage() {
           </Pressable>
         )}
       </View>
+      </View>
     </View>
   )
 }
@@ -681,80 +691,114 @@ const LIGHT_BG  = '#F1F1F6'
 const BORDER    = '#E9E9EB'
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff' },
+  root: { flex: 1, backgroundColor: '#f5f5f5', alignItems: 'center' },
+  contentWrap: { flex: 1, width: '100%', backgroundColor: '#fff' },
 
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', padding: 24 },
   errorText: { color: '#e55', fontSize: 15, textAlign: 'center', marginBottom: 16 },
   retryBtn: { backgroundColor: ORANGE, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 24 },
   retryBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 
-  // ── header (Swiggy-style) ──
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: Platform.OS === 'ios' ? 54 : 12,
-    paddingBottom: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: BORDER,
-    zIndex: 10,
-  },
-  headerBackBtn: { width: 36, height: 36, justifyContent: 'center' },
-  headerBackArrow: { fontSize: 22, color: DARK, fontWeight: '700' },
-  headerInfo: { flex: 1, marginLeft: 4 },
-  headerName: { fontSize: 16, fontWeight: '800', color: DARK },
-  headerLocation: { fontSize: 12, color: GREY, marginTop: 1 },
-  headerAction: { fontSize: 20, width: 36, textAlign: 'center' },
-
   scroll: { flex: 1 },
 
-  // ── 1. banner ──
-  bannerWrap: { position: 'relative', backgroundColor: '#f5f5f5' },
-  bannerImage: { height: 260 },
+  // ── 1. hero banner ──
+  bannerWrap: { position: 'relative', backgroundColor: '#111' },
+  bannerImage: { height: 320 },
+
+  floatBack: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 54 : 14,
+    left: 14,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  floatBackText: { fontSize: 20, color: DARK, fontWeight: '700', marginTop: -1 },
+
+  floatCall: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 54 : 14,
+    right: 14,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  floatCallText: { fontSize: 18 },
+
   dotsRow: {
     flexDirection: 'row',
     position: 'absolute',
-    bottom: 14,
+    bottom: 54,
     alignSelf: 'center',
     gap: 6,
   },
-  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.5)' },
-  dotActive: { backgroundColor: '#fff', width: 20 },
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.45)' },
+  dotActive: { backgroundColor: '#fff', width: 22 },
   imgCountBadge: {
     position: 'absolute',
-    bottom: 14,
+    bottom: 54,
     right: 14,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   imgCountText: { color: '#fff', fontSize: 11, fontWeight: '700' },
 
-  // ── 2. provider info card ──
+  // ── 2. provider info card (overlapping banner) ──
   infoCard: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+    marginTop: -40,
+    marginHorizontal: 12,
     backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: BORDER,
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingTop: 20,
+    paddingBottom: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 5,
   },
-  providerName: { fontSize: 22, fontWeight: '900', color: DARK, marginBottom: 6 },
-  infoPills: { marginBottom: 10 },
-  infoLocation: { fontSize: 13, color: GREY, marginBottom: 2 },
-  infoAddress: { fontSize: 12, color: '#93959F', marginTop: 2 },
-  statsRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
-  statItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  statValue: { fontSize: 13, fontWeight: '700', color: DARK },
-  statLabel: { fontSize: 11, color: GREY },
+  providerName: { fontSize: 24, fontWeight: '900', color: DARK, marginBottom: 8, letterSpacing: -0.4 },
+  infoLocationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
+  infoLocationPin: { fontSize: 13 },
+  infoLocation: { fontSize: 13, color: GREY },
+  infoAddress: { fontSize: 12, color: '#93959F', marginTop: 2, marginLeft: 17 },
+  statsRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
+  likeBadge: {
+    backgroundColor: '#FFF0F0',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  likeText: { fontSize: 12, fontWeight: '700', color: '#E53E3E' },
   featuredBadge: {
     backgroundColor: '#FFF9E6',
-    borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
-  featuredText: { fontSize: 11, fontWeight: '700', color: '#B76E00' },
+  featuredText: { fontSize: 12, fontWeight: '700', color: '#B76E00' },
 
   // ── 3. offer banner ──
   offerBanner: {
