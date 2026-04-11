@@ -12,7 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const indexName = "products"
+// indexName is the OpenSearch index that holds provider+service documents.
+const indexName = "providers"
 
 func opensearchURL() string {
 	return os.Getenv("OPENSEARCH_URL")
@@ -39,7 +40,11 @@ func doRequest(ctx context.Context, method, url string, body []byte) (map[string
 	return result, resp.StatusCode, nil
 }
 
-// Search handles GET /v1/search?q=<query>&page=<n>&size=<n>
+// Search handles GET /v1/search?q=<query>[&city=<name>][&area=<name>][&category=<slug>]
+//
+// Full-text searches provider_name, service_title, address, city_name, area_name
+// with fuzzy/prefix matching so partial words and typos still return results.
+// Optional filter params narrow results by city, area, or service category.
 func Search(c *gin.Context) {
 	query := c.Query("q")
 	if query == "" {
@@ -56,22 +61,99 @@ func Search(c *gin.Context) {
 		size = s
 	}
 
+	// ── Optional filter clauses ───────────────────────────────────────────────
+	var filterClauses []interface{}
+	if city := c.Query("city"); city != "" {
+		filterClauses = append(filterClauses, map[string]interface{}{
+			"match": map[string]interface{}{"city_name": map[string]interface{}{"query": city, "fuzziness": "AUTO"}},
+		})
+	}
+	if area := c.Query("area"); area != "" {
+		filterClauses = append(filterClauses, map[string]interface{}{
+			"match": map[string]interface{}{"area_name": map[string]interface{}{"query": area, "fuzziness": "AUTO"}},
+		})
+	}
+	if cat := c.Query("category"); cat != "" {
+		filterClauses = append(filterClauses, map[string]interface{}{
+			"term": map[string]interface{}{"category_slug": cat},
+		})
+	}
+	// Always restrict to active providers
+	filterClauses = append(filterClauses, map[string]interface{}{
+		"term": map[string]interface{}{"status": "active"},
+	})
+
+	// Combine: either the fuzzy multi_match OR the wildcard prefix must hit.
+	// filter narrows city/area/category without affecting score.
+	wildcardQ := query + "*"
+	boolQuery := map[string]interface{}{
+		"should": []interface{}{
+			// Fuzzy full-word match (handles typos like "glmour" → "glamour")
+			map[string]interface{}{
+				"multi_match": map[string]interface{}{
+					"query":         query,
+					"fields":        []string{"provider_name^4", "service_title^3", "area_name^2", "city_name^2", "address^1"},
+					"type":          "best_fields",
+					"fuzziness":     "AUTO",
+					"prefix_length": 1,
+					"operator":      "or",
+					"boost":         2,
+				},
+			},
+			// Wildcard prefix match (handles "brid" → "bridal", "glam" → "glamour")
+			map[string]interface{}{
+				"wildcard": map[string]interface{}{
+					"provider_name.keyword": map[string]interface{}{"value": wildcardQ, "case_insensitive": true, "boost": 1.5},
+				},
+			},
+			map[string]interface{}{
+				"wildcard": map[string]interface{}{
+					"service_title.keyword": map[string]interface{}{"value": wildcardQ, "case_insensitive": true, "boost": 1},
+				},
+			},
+		},
+		"minimum_should_match": 1,
+		"filter":               filterClauses,
+	}
+
 	osQuery := map[string]interface{}{
 		"from": (page - 1) * size,
 		"size": size,
 		"query": map[string]interface{}{
-			"multi_match": map[string]interface{}{
-				"query":     query,
-				"fields":    []string{"title^3", "description^1", "tags^2"},
-				"type":      "best_fields",
-				"fuzziness": "AUTO",
+			"function_score": map[string]interface{}{
+				"query": map[string]interface{}{
+					"bool": boolQuery,
+				},
+				"functions": []interface{}{
+					// Featured providers get 3× score boost
+					map[string]interface{}{
+						"filter": map[string]interface{}{
+							"term": map[string]interface{}{"is_featured": true},
+						},
+						"weight": 3.0,
+					},
+					// Boosted providers get 2× score boost
+					map[string]interface{}{
+						"filter": map[string]interface{}{
+							"term": map[string]interface{}{"is_boosted": true},
+						},
+						"weight": 2.0,
+					},
+				},
+				"boost_mode":  "multiply",
+				"score_mode":  "max",
 			},
 		},
 		"highlight": map[string]interface{}{
 			"fields": map[string]interface{}{
-				"title":       map[string]interface{}{},
-				"description": map[string]interface{}{},
+				"provider_name": map[string]interface{}{},
+				"service_title": map[string]interface{}{},
+				"area_name":     map[string]interface{}{},
 			},
+		},
+		"sort": []interface{}{
+			map[string]interface{}{"_score": map[string]interface{}{"order": "desc"}},
+			map[string]interface{}{"likes_count": map[string]interface{}{"order": "desc"}},
 		},
 	}
 
@@ -132,3 +214,4 @@ func DeleteDocument(c *gin.Context) {
 
 	c.JSON(statusCode, result)
 }
+

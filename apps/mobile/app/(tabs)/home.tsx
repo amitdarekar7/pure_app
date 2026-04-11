@@ -1,4 +1,5 @@
 import {
+  ActivityIndicator,
   Alert,
   Image,
   Pressable,
@@ -7,12 +8,14 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'expo-router'
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
 import { useAuth } from '../../lib/auth-context'
-import { LocationAPI, ProvidersAPI, BookingsAPI, City, Area, Provider, BookingSummary } from '../../lib/api'
+import { LocationAPI, ProvidersAPI, BookingsAPI, SearchAPI, City, Area, Provider, BookingSummary } from '../../lib/api'
+import type { SearchHit } from '../../lib/api'
 import { useEventStream, type BookingRespondedEvent } from '../../lib/use-event-stream'
 
 const LOGO = require('../../assets/images/logo_pure.png')
@@ -47,9 +50,20 @@ const SERVICES: { id: string; icon: MCIcon; label: string; sub: string; bg: stri
 ]
 
 export default function HomeScreen() {
-  const { user }   = useAuth()
+  const { user, isLoading: authLoading } = useAuth()
   const router     = useRouter()
   const scrollRef  = useRef<ScrollView>(null)
+  const { width }  = useWindowDimensions()
+  // Responsive helpers
+  const isTablet   = width >= 600
+  const isDesktop  = width >= 1024
+  const maxW       = isDesktop ? 760 : isTablet ? 640 : 520
+  // Service grid: 4 cols on desktop, 3 on tablet, 3 on phone
+  const gridCols   = isDesktop ? 4 : 3
+  const gridGap    = 10
+  // scroll padding=16*2 + card padding=20*2 = 72
+  const containerW = Math.min(width, maxW) - 72
+  const catW       = Math.floor((containerW - (gridCols - 1) * gridGap) / gridCols)
 
   // ── Location state ──────────────────────────────────────────────────────
   const [cities,      setCities]      = useState<City[]>([])
@@ -77,6 +91,18 @@ export default function HomeScreen() {
   const [bookingBanner,    setBookingBanner]      = useState<{ text: string; ok: boolean } | null>(null)
   const [recentBookings,   setRecentBookings]     = useState<BookingSummary[]>([])
   const [bookingsLoading,  setBookingsLoading]    = useState(false)
+
+  // ── Global full-text search state ───────────────────────────────────────
+  const [globalQuery,     setGlobalQuery]     = useState('')
+  const [globalResults,   setGlobalResults]   = useState<SearchHit[]>([])
+  const [globalTotal,     setGlobalTotal]     = useState(0)
+  const [globalSearching, setGlobalSearching] = useState(false)
+  const [globalMode,      setGlobalMode]      = useState(false)
+
+  // ── Autocomplete suggestions state ───────────────────────────────────────
+  const [suggestions,     setSuggestions]     = useState<string[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const suggestDebounce   = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Fetch last 3 bookings whenever user is signed in
   const fetchRecentBookings = useCallback(async () => {
@@ -173,6 +199,78 @@ export default function HomeScreen() {
     setSearched(false)
   }
 
+  // Fetch autocomplete suggestions debounced at 250 ms
+  function onQueryChange(t: string) {
+    setGlobalQuery(t)
+    if (!t.trim()) {
+      clearGlobalSearch()
+      setSuggestions([])
+      setShowSuggestions(false)
+      return
+    }
+    if (suggestDebounce.current) clearTimeout(suggestDebounce.current)
+    suggestDebounce.current = setTimeout(async () => {
+      try {
+        const data = await SearchAPI.query(t.trim())
+        const hits = data.hits?.hits ?? []
+        const seen = new Set<string>()
+        const list: string[] = []
+        for (const h of hits) {
+          const pn = h._source.provider_name
+          const st = h._source.service_title
+          if (pn && !seen.has(pn)) { seen.add(pn); list.push(pn) }
+          if (st && !seen.has(st)) { seen.add(st); list.push(st) }
+          if (list.length >= 6) break
+        }
+        setSuggestions(list)
+        setShowSuggestions(list.length > 0)
+      } catch {
+        setSuggestions([])
+        setShowSuggestions(false)
+      }
+    }, 250)
+  }
+
+  function pickSuggestion(s: string) {
+    setGlobalQuery(s)
+    setSuggestions([])
+    setShowSuggestions(false)
+    runSearch(s)
+  }
+
+  async function runSearch(q: string) {
+    closeAll()
+    setGlobalSearching(true)
+    setGlobalMode(true)
+    try {
+      const data = await SearchAPI.query(q)
+      setGlobalResults(data.hits?.hits ?? [])
+      setGlobalTotal(data.hits?.total?.value ?? 0)
+    } catch {
+      setGlobalResults([])
+      setGlobalTotal(0)
+    } finally {
+      setGlobalSearching(false)
+    }
+  }
+
+  async function handleGlobalSearch() {
+    const q = globalQuery.trim()
+    if (!q) return
+    setSuggestions([])
+    setShowSuggestions(false)
+    runSearch(q)
+  }
+
+  function clearGlobalSearch() {
+    setGlobalMode(false)
+    setGlobalQuery('')
+    setGlobalResults([])
+    setGlobalTotal(0)
+    setSuggestions([])
+    setShowSuggestions(false)
+  }
+
   async function handleLike(providerId: string) {
     const isLiked = likedIds.has(providerId)
     // Optimistic update
@@ -212,19 +310,41 @@ export default function HomeScreen() {
     }
   }
 
+  if (authLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#f8f8f8', alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color="#7c6af7" />
+      </View>
+    )
+  }
+
   return (
-    <ScrollView
-      ref={scrollRef}
-      style={styles.root}
-      contentContainerStyle={styles.scroll}
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-    >
+    <View style={{ flex: 1 }}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.root}
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        onScrollBeginDrag={closeAll}
+      >
       <View style={styles.card}>
+        <View style={{ maxWidth: maxW, width: '100%', alignSelf: 'center' }}>
 
         {/* ── Header ───────────────────────────────────────────── */}
         <View style={styles.header}>
-          <Image source={LOGO} style={styles.logoImage} resizeMode="contain" />
+          <Pressable
+            onPress={() => {
+              clearGlobalSearch()
+              setSearched(false)
+              setProviders([])
+              closeAll()
+              scrollRef.current?.scrollTo({ y: 0, animated: true })
+            }}
+            hitSlop={8}
+          >
+            <Image source={LOGO} style={styles.logoImage} resizeMode="contain" />
+          </Pressable>
 
           {user ? (
             <Pressable
@@ -232,9 +352,11 @@ export default function HomeScreen() {
               style={styles.avatarRow}
             >
               <View style={styles.avatarCircle}>
-                <Text style={styles.avatarLetter}>
-                  {(user.display_name ?? user.email)[0].toUpperCase()}
-                </Text>
+                {user.avatar_url
+                  ? <Image source={{ uri: user.avatar_url }} style={styles.avatarCircleImage} />
+                  : <Text style={styles.avatarLetter}>
+                      {(user.display_name ?? user.email)[0].toUpperCase()}
+                    </Text>}
               </View>
               <View>
                 <Text style={styles.avatarName} numberOfLines={1}>
@@ -254,13 +376,149 @@ export default function HomeScreen() {
           )}
         </View>
 
-        {/* ── Section label ────────────────────────────────────── */}
-        <View style={styles.sectionRow}>
-          <Text style={styles.sectionTitle}>Find a Service</Text>
-          <Text style={styles.sectionSub}>Select city, area &amp; service, then Search</Text>
+        {/* ── Global search bar ────────────────────────────────── */}
+        <View style={styles.globalSearchWrap}>
+          <View style={styles.globalSearchRow}>
+            <Ionicons name="search-outline" size={16} color="#aaa" />
+            <TextInput
+              style={styles.globalSearchInput}
+              placeholder="Search salons, services, stylists…"
+              placeholderTextColor="#bbb"
+              value={globalQuery}
+              onChangeText={onQueryChange}
+              onSubmitEditing={handleGlobalSearch}
+              onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true) }}
+              returnKeyType="search"
+              autoCorrect={false}
+              autoCapitalize="none"
+            />
+            {(globalMode || globalQuery.length > 0) && (
+              <Pressable onPress={clearGlobalSearch} hitSlop={8}>
+                <Ionicons name="close-circle" size={16} color="#ccc" />
+              </Pressable>
+            )}
+            <Pressable
+              style={[styles.globalSearchBtn, !globalQuery.trim() && styles.globalSearchBtnDisabled]}
+              onPress={handleGlobalSearch}
+              disabled={!globalQuery.trim() || globalSearching}
+            >
+              {globalSearching
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={styles.globalSearchBtnText}>Search</Text>}
+            </Pressable>
+          </View>
+
+          {/* ── Autocomplete dropdown ──────────────────────────── */}
+          {showSuggestions && (
+            <View style={styles.suggestBox}>
+              {suggestions.map((s, i) => (
+                <Pressable
+                  key={i}
+                  style={[styles.suggestItem, i < suggestions.length - 1 && styles.suggestItemBorder]}
+                  onPress={() => pickSuggestion(s)}
+                >
+                  <Ionicons name="search-outline" size={13} color="#aaa" style={{ marginRight: 6 }} />
+                  <Text style={styles.suggestText} numberOfLines={1}>{s}</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
         </View>
 
-        {/* ── City dropdown ────────────────────────────────────── */}
+        {/* ── Global search results (shown when user searched) ── */}
+        {globalMode && (
+          <>
+            <View style={styles.sectionRow}>
+              <Text style={styles.sectionTitle}>
+                {globalSearching ? 'Searching…' : `${globalTotal} result${globalTotal !== 1 ? 's' : ''}`}
+              </Text>
+              <Text style={styles.sectionSub}>for "{globalQuery}"</Text>
+            </View>
+
+            {globalSearching && (
+              <View style={styles.providerEmpty}>
+                <ActivityIndicator size="large" color="#7c6af7" />
+              </View>
+            )}
+
+            {!globalSearching && globalResults.length === 0 && (
+              <View style={styles.providerEmpty}>
+                <Ionicons name="search-outline" size={32} color="#ddd" />
+                <Text style={styles.providerEmptyTitle}>No results found</Text>
+                <Text style={styles.providerEmptyText}>Try a different keyword</Text>
+              </View>
+            )}
+
+            {!globalSearching && globalResults.map(hit => {
+              const s = hit._source
+              const providerName = (hit.highlight?.provider_name?.[0] ?? s.provider_name ?? 'Unknown Salon')
+                .replace(/<[^>]+>/g, '')
+              const serviceTitle = (hit.highlight?.service_title?.[0] ?? s.service_title ?? '')
+                .replace(/<[^>]+>/g, '')
+              const location = [s.area_name, s.city_name].filter(Boolean).join(', ')
+              return (
+                <Pressable
+                  key={hit._id}
+                  style={styles.searchHitCard}
+                  onPress={() => s.provider_id
+                    ? router.push({ pathname: '/provider/[id]', params: { id: s.provider_id, sid: s.service_id } } as any)
+                    : undefined}
+                >
+                  <View style={styles.searchHitTop}>
+                    <View style={styles.searchHitLeft}>
+                      <Text style={styles.searchHitTitle} numberOfLines={1}>{providerName}</Text>
+                      {serviceTitle ? (
+                        <View style={styles.searchHitBadge}>
+                          <Text style={styles.searchHitBadgeText}>{serviceTitle}</Text>
+                        </View>
+                      ) : null}
+                      {location ? (
+                        <View style={styles.searchHitLocationRow}>
+                          <Ionicons name="location-outline" size={11} color="#aaa" />
+                          <Text style={styles.searchHitLocation}>{location}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <View style={styles.searchHitRight}>
+                      {s.price_paise != null && (
+                        s.discount_pct && s.discount_pct > 0 && s.discounted_price_paise ? (
+                          <View style={{ alignItems: 'flex-end' }}>
+                            <Text style={styles.searchHitPriceStrike}>₹{Math.round(s.price_paise / 100)}</Text>
+                            <Text style={styles.searchHitPriceDiscount}>₹{Math.round(s.discounted_price_paise / 100)}</Text>
+                          </View>
+                        ) : (
+                          <Text style={styles.searchHitPrice}>₹{Math.round(s.price_paise / 100)}</Text>
+                        )
+                      )}
+                      {s.duration_mins != null && (
+                        <Text style={styles.searchHitDuration}>{s.duration_mins} min</Text>
+                      )}
+                      <Ionicons name="chevron-forward" size={14} color="#ccc" />
+                    </View>
+                  </View>
+                  <View style={styles.searchHitPayBadge}>
+                    <Text style={styles.searchHitPayBadgeIcon}>💳</Text>
+                    <Text style={styles.searchHitPayBadgeText}>
+                      {s.discount_pct && s.discount_pct > 0
+                        ? `${s.discount_pct}% OFF on this service`
+                        : 'Pay at the venue · No advance payment needed'}
+                    </Text>
+                  </View>
+                </Pressable>
+              )
+            })}
+          </>
+        )}
+
+        {/* ── Location browse (hidden while in global search mode) ─ */}
+        {!globalMode && (
+          <>
+        {/* ── Section label ──────────────────────────────────── */}
+        <View style={styles.sectionRow}>
+            <Text style={styles.sectionTitle}>Browse by Location</Text>
+            <Text style={styles.sectionSub}>Select city &amp; service to find salons</Text>
+        </View>
+
         <View style={styles.dropdownBar}>
           <Ionicons name="location-sharp" size={15} color="#7c6af7" />
           <Text style={styles.dropdownLabel}>City</Text>
@@ -277,7 +535,21 @@ export default function HomeScreen() {
               <Ionicons name="close-circle" size={14} color="#bbb" />
             </Pressable>
           ) : null}
-          <Ionicons name={showCities ? 'chevron-up' : 'chevron-down'} size={14} color="#999" />
+          <Pressable
+            onPress={() => {
+              if (showCities) {
+                setShowCities(false)
+              } else {
+                setCitySearch('')
+                setShowCities(true)
+                setShowAreas(false)
+                setShowServices(false)
+              }
+            }}
+            hitSlop={8}
+          >
+            <Ionicons name={showCities ? 'chevron-up' : 'chevron-down'} size={14} color="#999" />
+          </Pressable>
         </View>
 
         {showCities && (
@@ -324,7 +596,7 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* ── Area dropdown ────────────────────────────────────── */}
+        {/* ── Area dropdown ──────────────────────────── */}
         <View style={[styles.dropdownBar, !city && styles.dropdownBarDisabled]}>
           <Ionicons name="map-outline" size={15} color={city ? '#7c6af7' : '#ccc'} />
           <Text style={[styles.dropdownLabel, !city && styles.dropdownLabelDisabled]}>Area</Text>
@@ -342,7 +614,22 @@ export default function HomeScreen() {
               <Ionicons name="close-circle" size={14} color="#bbb" />
             </Pressable>
           ) : null}
-          <Ionicons name={showAreas ? 'chevron-up' : 'chevron-down'} size={14} color="#999" />
+          <Pressable
+            onPress={() => {
+              if (showAreas) {
+                setShowAreas(false)
+              } else {
+                if (!city) return
+                setAreaSearch('')
+                setShowAreas(true)
+                setShowCities(false)
+                setShowServices(false)
+              }
+            }}
+            hitSlop={8}
+          >
+            <Ionicons name={showAreas ? 'chevron-up' : 'chevron-down'} size={14} color="#999" />
+          </Pressable>
         </View>
 
         {showAreas && (
@@ -476,7 +763,7 @@ export default function HomeScreen() {
                 return (
                   <Pressable
                     key={svc.id}
-                    style={[styles.catCard, selected && styles.catCardSelected]}
+                    style={[styles.catCard, { width: catW }, selected && styles.catCardSelected]}
                     onPress={() => { toggleService(svc); closeAll() }}
                   >
                     <View style={[styles.catIconBox, { backgroundColor: selected ? svc.iconColor : svc.bg }]}>
@@ -563,10 +850,22 @@ export default function HomeScreen() {
                 </View>
                 <View style={styles.providerRight}>
                   <View style={styles.pricePill}>
-                    <Text style={styles.providerPrice}>₹{Math.round(p.price_paise / 100)}</Text>
+                    {p.discount_pct > 0 && p.discounted_price_paise != null ? (
+                      <>
+                        <Text style={styles.providerPriceStrike}>₹{Math.round(p.price_paise / 100)}</Text>
+                        <Text style={styles.providerPriceDiscount}>₹{Math.round(p.discounted_price_paise / 100)}</Text>
+                      </>
+                    ) : (
+                      <Text style={styles.providerPrice}>₹{Math.round(p.price_paise / 100)}</Text>
+                    )}
                     <Text style={styles.priceSep}>·</Text>
                     <Text style={styles.providerDuration}>{p.duration_mins} min</Text>
                   </View>
+                  {p.discount_pct > 0 && (
+                    <View style={styles.discountBadge}>
+                      <Text style={styles.discountBadgeText}>{p.discount_pct}% OFF</Text>
+                    </View>
+                  )}
                   <Pressable style={styles.bookBtn} onPress={() => router.push({ pathname: '/provider/[id]', params: { id: p.id, sid: p.service_id } } as any)}>
                     <Text style={styles.bookBtnText}>View</Text>
                   </Pressable>
@@ -576,8 +875,11 @@ export default function HomeScreen() {
           </View>
         )}
 
+          </>
+        )}
+
         {/* ── My Bookings widget ───────────────────────────────── */}
-        {user && !searched && (
+        {user && !searched && !globalMode && (
           <View style={styles.bwWidget}>
             <View style={styles.bwHeader}>
               <View style={styles.bwTitleRow}>
@@ -637,8 +939,10 @@ export default function HomeScreen() {
         )}
 
       </View>
+        </View>
       <View style={{ height: 32 }} />
     </ScrollView>
+    </View>
   )
 }
 
@@ -646,12 +950,178 @@ const styles = StyleSheet.create({
   root:   { flex: 1, backgroundColor: '#f8f8f8' },
   scroll: { alignItems: 'center', padding: 16 },
 
+  // ── Global search bar ───────────────────────────────────────────────────
+  globalSearchWrap: {
+    position:     'relative',
+    marginBottom: 4,
+    zIndex:       100,
+  },
+  globalSearchRow: {
+    flexDirection:    'row',
+    alignItems:       'center',
+    backgroundColor:  '#fff',
+    borderRadius:     14,
+    borderWidth:      1,
+    borderColor:      '#ebe8ff',
+    paddingHorizontal: 12,
+    paddingVertical:   8,
+    gap:              8,
+    marginBottom:     0,
+  },
+
+  suggestBox: {
+    backgroundColor:  '#fff',
+    borderWidth:      1,
+    borderColor:      '#ebe8ff',
+    borderTopWidth:   0,
+    borderBottomLeftRadius:  12,
+    borderBottomRightRadius: 12,
+    overflow:         'hidden',
+    marginBottom:     12,
+  },
+  suggestItem: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    paddingHorizontal: 14,
+    paddingVertical:   11,
+  },
+  suggestItemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f0ff',
+  },
+  suggestText: {
+    fontSize: 14,
+    color:    '#333',
+    flex:     1,
+  },
+  globalSearchInput: {
+    flex:       1,
+    fontSize:   14,
+    color:      '#111',
+    paddingVertical: 0,
+  },
+  globalSearchBtn: {
+    backgroundColor: '#7c6af7',
+    borderRadius:    10,
+    paddingHorizontal: 14,
+    paddingVertical:   7,
+  },
+  globalSearchBtnDisabled: {
+    backgroundColor: '#c4b5fd',
+  },
+  globalSearchBtnText: {
+    color:      '#fff',
+    fontWeight: '700',
+    fontSize:   13,
+  },
+
+  // ── Global search result cards ─────────────────────────────────────────
+  searchHitCard: {
+    backgroundColor:  '#fff',
+    borderRadius:     14,
+    padding:          14,
+    marginBottom:     10,
+    shadowColor:      '#000',
+    shadowOffset:     { width: 0, height: 1 },
+    shadowOpacity:    0.05,
+    shadowRadius:     4,
+    elevation:        2,
+  },
+  searchHitTop: {
+    flexDirection:  'row',
+    alignItems:     'flex-start',
+    marginBottom:   10,
+  },
+  searchHitLeft: { flex: 1, gap: 4 },
+  searchHitTitle: {
+    fontSize:   14,
+    fontWeight: '700',
+    color:      '#111827',
+  },
+  searchHitBadge: {
+    alignSelf:        'flex-start',
+    backgroundColor:  '#ede8ff',
+    borderRadius:     20,
+    paddingHorizontal: 8,
+    paddingVertical:  3,
+  },
+  searchHitBadgeText: {
+    fontSize:   11,
+    color:      '#7c6af7',
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  searchHitDesc: {
+    fontSize:   12,
+    color:      '#6b7280',
+    lineHeight: 17,
+  },
+  searchHitLocationRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           3,
+    marginTop:     2,
+  },
+  searchHitLocation: {
+    fontSize: 11,
+    color:    '#9ca3af',
+  },
+  searchHitRight: {
+    alignItems:  'flex-end',
+    gap:         4,
+    marginLeft:  8,
+  },
+  searchHitPrice: {
+    fontSize:   14,
+    fontWeight: '700',
+    color:      '#7c6af7',
+  },
+  searchHitPriceStrike: {
+    fontSize:   11,
+    fontWeight: '500',
+    color:      '#aaa',
+    textDecorationLine: 'line-through' as const,
+  },
+  searchHitPriceDiscount: {
+    fontSize:   14,
+    fontWeight: '700',
+    color:      '#16a34a',
+  },
+  searchHitDuration: {
+    fontSize: 11,
+    color:    '#9ca3af',
+  },
+  searchHitPayNote: {
+    fontSize:   9,
+    color:      '#16a34a',
+    fontWeight: '600',
+    textAlign:  'right',
+  },
+  searchHitPayBadge: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    backgroundColor:   '#f0fdf4',
+    borderRadius:      8,
+    paddingHorizontal: 10,
+    paddingVertical:   7,
+    gap:               6,
+  },
+  searchHitPayBadgeIcon: {
+    fontSize: 13,
+  },
+  searchHitPayBadgeText: {
+    fontSize:   11,
+    color:      '#166534',
+    fontWeight: '600',
+    flex:       1,
+  },
+
   card: {
     width:           '100%',
-    maxWidth:        520,
     backgroundColor: '#f8f8f8',
     borderRadius:    20,
     padding:         20,
+    alignSelf:       'center',
     shadowColor:     '#000',
     shadowOffset:    { width: 0, height: 4 },
     shadowOpacity:   0.08,
@@ -689,6 +1159,7 @@ const styles = StyleSheet.create({
     flexShrink:      0,
   },
   avatarLetter: { color: '#7c6af7', fontWeight: '900', fontSize: 15 },
+  avatarCircleImage: { width: 36, height: 36, borderRadius: 18 },
   avatarName:   { color: '#0f0f23', fontWeight: '800', fontSize: 13, maxWidth: 80 },
   avatarSub:    { color: '#aaa',    fontSize: 10, marginTop: 1 },
 
@@ -784,15 +1255,15 @@ const styles = StyleSheet.create({
   dropdownItemSub:        { color: '#bbb', fontSize: 11, marginTop: 2 },
   dropdownItemRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
 
-  // ── Service grid (3 cols) ─────────────────────────────────────────
+  // ── Service grid ──────────────────────────────────────────────
   grid: {
     flexDirection: 'row',
     flexWrap:      'wrap',
-    gap:           10,
+    justifyContent: 'space-between',
+    rowGap:        10,
     marginBottom:  20,
   },
   catCard: {
-    width:             '30.5%',
     alignItems:        'center',
     backgroundColor:   '#fafafa',
     borderRadius:      14,
@@ -892,8 +1363,17 @@ const styles = StyleSheet.create({
     paddingVertical:   4,
   },
   providerPrice:    { color: '#1a1a1a', fontWeight: '800', fontSize: 13 },
+  providerPriceStrike: { color: '#aaa', fontWeight: '600', fontSize: 11, textDecorationLine: 'line-through' as const },
+  providerPriceDiscount: { color: '#16a34a', fontWeight: '800', fontSize: 13 },
   priceSep:         { color: '#888', fontSize: 11 },
   providerDuration: { color: '#888', fontSize: 11 },
+  discountBadge: {
+    backgroundColor: '#f0fdf4',
+    borderRadius:    6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  discountBadgeText: { color: '#16a34a', fontWeight: '700', fontSize: 10 },
   bookBtn: {
     backgroundColor:   '#f4f0ff',
     borderRadius:      10,

@@ -71,6 +71,13 @@ function ProviderTabs() {
           tabBarIcon:  ({ color }) => <TabIcon name="images-outline" color={color} />,
         }}
       />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title:       'Profile',
+          href:        null,
+        }}
+      />
     </Tabs>
   )
 }

@@ -16,9 +16,9 @@ function stripTags(s: string | undefined): string {
   return s?.replace(/<[^>]+>/g, '') ?? ''
 }
 
-function formatPrice(cents: number | undefined): string {
-  if (cents == null) return ''
-  return `$${(cents / 100).toFixed(2)}`
+function formatPrice(paise: number | undefined): string {
+  if (paise == null) return ''
+  return `₹${(paise / 100).toFixed(0)}`
 }
 
 export default function SearchScreen() {
@@ -89,26 +89,37 @@ export default function SearchScreen() {
           data={results}
           keyExtractor={(item) => item._id}
           renderItem={({ item }) => {
-            const title = stripTags(item.highlight?.title?.[0]) || item._source.title || item._id
-            const desc  = stripTags(item.highlight?.description?.[0]) || item._source.description
-            const price = formatPrice(item._source.price_cents)
-            const tags  = item._source.tags ?? []
+            const providerName = stripTags(item.highlight?.provider_name?.[0]) || item._source.provider_name || ''
+            const serviceTitle = stripTags(item.highlight?.service_title?.[0]) || item._source.service_title || ''
+            const areaName     = stripTags(item.highlight?.area_name?.[0]) || item._source.area_name || ''
+            const price        = formatPrice(item._source.price_paise)
+            const duration     = item._source.duration_mins
             return (
               <View style={styles.card}>
                 <View style={styles.cardHeader}>
-                  <Text style={styles.title} numberOfLines={2}>{title}</Text>
+                  <Text style={styles.title} numberOfLines={2}>{providerName}</Text>
                   {price ? <Text style={styles.price}>{price}</Text> : null}
                 </View>
-                {desc ? (
-                  <Text style={styles.desc} numberOfLines={2}>{desc}</Text>
+                {serviceTitle ? (
+                  <Text style={styles.desc} numberOfLines={2}>{serviceTitle}</Text>
                 ) : null}
                 <View style={styles.cardFooter}>
                   <View style={styles.tagsRow}>
-                    {tags.slice(0, 3).map((tag) => (
-                      <View key={tag} style={styles.tag}>
-                        <Text style={styles.tagText}>{tag}</Text>
+                    {areaName ? (
+                      <View style={styles.tag}>
+                        <Text style={styles.tagText}>{areaName}</Text>
                       </View>
-                    ))}
+                    ) : null}
+                    {item._source.category_slug ? (
+                      <View style={styles.tag}>
+                        <Text style={styles.tagText}>{item._source.category_slug}</Text>
+                      </View>
+                    ) : null}
+                    {duration ? (
+                      <View style={styles.tag}>
+                        <Text style={styles.tagText}>{duration} min</Text>
+                      </View>
+                    ) : null}
                   </View>
                   <Text style={styles.score}>{item._score?.toFixed(2)}</Text>
                 </View>

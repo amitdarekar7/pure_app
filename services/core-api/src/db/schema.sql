@@ -24,6 +24,7 @@ CREATE TABLE profiles (
   display_name TEXT,
   avatar_url   TEXT,
   bio          TEXT,
+  address      TEXT,
   locale       TEXT        NOT NULL DEFAULT 'en-US',
   timezone     TEXT        NOT NULL DEFAULT 'UTC',
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()

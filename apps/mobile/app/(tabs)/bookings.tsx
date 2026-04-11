@@ -1,15 +1,18 @@
 import {
   ActivityIndicator,
   Alert,
+  Image,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native'
 import { useState, useEffect, useCallback } from 'react'
-import { useFocusEffect } from 'expo-router'
+import { useFocusEffect, useRouter } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import { useAuth } from '../../lib/auth-context'
 import { BookingsAPI, BookingSummary } from '../../lib/api'
@@ -19,6 +22,8 @@ import { useEventStream, type BookingRespondedEvent } from '../../lib/use-event-
 
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const DAYS_SHORT   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+
+const LOGO = require('../../assets/images/logo_pure.png')
 
 function formatDate(iso: string) {
   const d = new Date(iso)
@@ -48,6 +53,9 @@ function statusMeta(status: Status): { label: string; color: string; bg: string;
 
 export default function BookingsScreen() {
   const { user } = useAuth()
+  const router = useRouter()
+  const { width } = useWindowDimensions()
+  const maxW = width >= 1024 ? 760 : width >= 600 ? 640 : Math.min(width, 520)
   const [bookings,   setBookings]   = useState<BookingSummary[]>([])
   const [loading,    setLoading]    = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -113,43 +121,27 @@ export default function BookingsScreen() {
     fetchBookings()
   }
 
-  // ── unauthenticated ─────────────────────────────────────────────────────
-  if (!user) {
-    return (
-      <View style={styles.center}>
-        <Ionicons name="lock-closed-outline" size={48} color="#aaa" />
-        <Text style={styles.emptyText}>Sign in to view your bookings</Text>
-      </View>
-    )
-  }
-
-  // ── loading ─────────────────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#7c6af7" />
-      </View>
-    )
-  }
-
-  // ── empty ────────────────────────────────────────────────────────────────
-  if (bookings.length === 0) {
-    return (
-      <ScrollView
-        contentContainerStyle={styles.center}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#7c6af7" />}
-      >
-        <Ionicons name="calendar-outline" size={56} color="#ccc" />
-        <Text style={styles.emptyTitle}>No bookings yet</Text>
-        <Text style={styles.emptyText}>Your booking history will appear here.</Text>
-      </ScrollView>
-    )
-  }
-
-  // ── list ─────────────────────────────────────────────────────────────────
-  return (
+  // ── render ────────────────────────────────────────────────────────────────
+  const content = !user ? (
+    <View style={styles.center}>
+      <Ionicons name="lock-closed-outline" size={48} color="#aaa" />
+      <Text style={styles.emptyText}>Sign in to view your bookings</Text>
+    </View>
+  ) : loading ? (
+    <View style={styles.center}>
+      <ActivityIndicator size="large" color="#7c6af7" />
+    </View>
+  ) : bookings.length === 0 ? (
     <ScrollView
-      style={styles.root}
+      contentContainerStyle={styles.center}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#7c6af7" />}
+    >
+      <Ionicons name="calendar-outline" size={56} color="#ccc" />
+      <Text style={styles.emptyTitle}>No bookings yet</Text>
+      <Text style={styles.emptyText}>Your booking history will appear here.</Text>
+    </ScrollView>
+  ) : (
+    <ScrollView
       contentContainerStyle={styles.list}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#7c6af7" />}
     >
@@ -158,9 +150,7 @@ export default function BookingsScreen() {
         const highlight = updatedIds.has(b.id)
         return (
           <View key={b.id} style={[styles.card, highlight && styles.cardHighlight]}>
-            {/* highlight pulse border on newly updated card */}
             {highlight && <View style={styles.highlightBar} />}
-
             <View style={styles.cardRow}>
               <View style={styles.cardInfo}>
                 <Text style={styles.providerName} numberOfLines={1}>{b.provider_name}</Text>
@@ -180,12 +170,43 @@ export default function BookingsScreen() {
       })}
     </ScrollView>
   )
+
+  return (
+    <View style={styles.root}>
+      {/* ── Header ─────────────────────────────────────────────── */}
+      <View style={styles.headerBar}>
+        <Pressable onPress={() => router.navigate('/(tabs)/home')} hitSlop={8}>
+          <Image source={LOGO} style={styles.logoImage} resizeMode="contain" />
+        </Pressable>
+        <Text style={styles.pageTitle}>My Bookings</Text>
+      </View>
+      <View style={{ flex: 1, alignItems: 'center' }}>
+        <View style={{ flex: 1, width: '100%', maxWidth: maxW }}>
+          {content}
+        </View>
+      </View>
+    </View>
+  )
 }
 
 const styles = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: '#f8f8f8' },
-  list:   { padding: 16, gap: 12 },
+  root:   { flex: 1, backgroundColor: '#f5f5f7' },
+  list:   { padding: 16, gap: 12, paddingBottom: 32 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 32 },
+
+  headerBar: {
+    backgroundColor:  '#fff',
+    paddingHorizontal: 20,
+    paddingTop:        Platform.OS === 'ios' ? 52 : Platform.OS === 'android' ? 28 : 16,
+    paddingBottom:     14,
+    flexDirection:    'row',
+    alignItems:       'center',
+    justifyContent:   'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f8',
+  },
+  logoImage: { width: 130, height: 44 },
+  pageTitle: { fontSize: 16, fontWeight: '800', color: '#0f0f23' },
 
   emptyTitle: { fontSize: 18, fontWeight: '700', color: '#374151', marginTop: 8 },
   emptyText:  { fontSize: 14, color: '#9ca3af', textAlign: 'center' },

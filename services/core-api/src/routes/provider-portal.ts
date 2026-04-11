@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import { requireAuth } from '../middleware/auth'
 import { publish } from '../kafka/producer'
 import { TOPICS } from '../kafka/topics'
+import { indexProviderService } from '../search-index'
 
 /**
  * Provider Portal Routes — /v1/provider/*
@@ -170,13 +171,14 @@ export async function providerPortalRoutes(app: FastifyInstance) {
       if (!ctx) return
 
       const { rows: pRows } = await app.db.query<{
-        id:       string
-        name:     string
-        address:  string | null
-        phone:    string | null
-        status:   string
+        id:                string
+        name:              string
+        address:           string | null
+        phone:             string | null
+        status:            string
+        profile_image_url: string | null
       }>(
-        `SELECT id, name, address, phone, status
+        `SELECT id, name, address, phone, status, profile_image_url
            FROM providers WHERE id = $1`,
         [ctx.providerId],
       )
@@ -188,8 +190,9 @@ export async function providerPortalRoutes(app: FastifyInstance) {
         price_paise:   number
         duration_mins: number
         is_available:  boolean
+        discount_pct:  number
       }>(
-        `SELECT id, category_slug, title, price_paise, duration_mins, is_available
+        `SELECT id, category_slug, title, price_paise, duration_mins, is_available, discount_pct
            FROM provider_services WHERE provider_id = $1
           ORDER BY category_slug, title`,
         [ctx.providerId],
@@ -214,6 +217,59 @@ export async function providerPortalRoutes(app: FastifyInstance) {
         services: svcRows,
         stats:    statsRows[0],
       })
+    },
+  )
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // PATCH /v1/provider/me — update provider profile (name, phone, address)
+  // ─────────────────────────────────────────────────────────────────────────
+  app.patch<{ Body: { name?: string; phone?: string; address?: string; profileImageUrl?: string } }>(
+    '/me',
+    { preHandler: requireAuth },
+    async (req, reply) => {
+      const ctx = await requireProviderAuth(app, req, reply)
+      if (!ctx) return
+
+      const { name, phone, address, profileImageUrl } = req.body ?? {}
+      const sets: string[] = []
+      const vals: unknown[] = []
+      let idx = 1
+
+      if (name !== undefined) {
+        const trimmed = (name ?? '').trim()
+        if (trimmed.length < 2) return reply.status(400).send({ error: 'Name must be at least 2 characters' })
+        sets.push(`name = $${idx++}`)
+        vals.push(trimmed)
+      }
+      if (phone !== undefined) {
+        sets.push(`phone = $${idx++}`)
+        vals.push(phone?.trim() || null)
+      }
+      if (address !== undefined) {
+        sets.push(`address = $${idx++}`)
+        vals.push(address?.trim() || null)
+      }
+      if (profileImageUrl !== undefined) {
+        if (profileImageUrl && typeof profileImageUrl === 'string' && profileImageUrl.length > 5 * 1024 * 1024) {
+          return reply.status(400).send({ error: 'profileImageUrl too large (max 5 MB)' })
+        }
+        sets.push(`profile_image_url = $${idx++}`)
+        vals.push(profileImageUrl?.trim() || null)
+      }
+
+      if (sets.length === 0) return reply.status(400).send({ error: 'No fields to update' })
+
+      sets.push(`updated_at = NOW()`)
+      vals.push(ctx.providerId)
+
+      const { rows } = await app.db.query<{
+        id: string; name: string; address: string | null; phone: string | null; status: string; profile_image_url: string | null
+      }>(
+        `UPDATE providers SET ${sets.join(', ')} WHERE id = $${idx} RETURNING id, name, address, phone, status, profile_image_url`,
+        vals,
+      )
+
+      return reply.send({ provider: rows[0] })
     },
   )
 
@@ -574,12 +630,12 @@ export async function providerPortalRoutes(app: FastifyInstance) {
 
   // ─────────────────────────────────────────────────────────────────────────
   // PATCH /v1/provider/services/:serviceId
-  // Toggle availability of a service
-  // Body: { isAvailable: boolean }
+  // Toggle availability and/or set discount for a service
+  // Body: { isAvailable?: boolean, discountPct?: number }
   // ─────────────────────────────────────────────────────────────────────────
   app.patch<{
     Params: { serviceId: string }
-    Body:   { isAvailable: boolean }
+    Body:   { isAvailable?: boolean; discountPct?: number }
   }>(
     '/services/:serviceId',
     { preHandler: requireAuth },
@@ -592,19 +648,91 @@ export async function providerPortalRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'invalid serviceId' })
       }
 
-      const { isAvailable } = req.body
-      if (typeof isAvailable !== 'boolean') {
+      const { isAvailable, discountPct } = req.body
+
+      if (isAvailable === undefined && discountPct === undefined) {
+        return reply.status(400).send({ error: 'provide isAvailable and/or discountPct' })
+      }
+      if (isAvailable !== undefined && typeof isAvailable !== 'boolean') {
         return reply.status(400).send({ error: 'isAvailable must be a boolean' })
       }
+      if (discountPct !== undefined) {
+        if (typeof discountPct !== 'number' || discountPct < 0 || discountPct > 50) {
+          return reply.status(400).send({ error: 'discountPct must be 0–50' })
+        }
+      }
+
+      // Build dynamic SET clause
+      const sets: string[] = []
+      const vals: unknown[] = []
+      let idx = 1
+
+      if (isAvailable !== undefined) {
+        sets.push(`is_available = $${idx++}`)
+        vals.push(isAvailable)
+      }
+      if (discountPct !== undefined) {
+        sets.push(`discount_pct = $${idx++}`)
+        vals.push(discountPct)
+      }
+
+      vals.push(serviceId, ctx.providerId)
 
       const { rowCount } = await app.db.query(
         `UPDATE provider_services
-            SET is_available = $1
-          WHERE id = $2 AND provider_id = $3`,
-        [isAvailable, serviceId, ctx.providerId],
+            SET ${sets.join(', ')}
+          WHERE id = $${idx++} AND provider_id = $${idx}`,
+        vals,
       )
 
       if (!rowCount) return reply.status(404).send({ error: 'service not found' })
+
+      // Re-index to OpenSearch so search results show updated discount
+      const { rows: svc } = await app.db.query<{
+        title: string; category_slug: string; price_paise: number; duration_mins: number;
+        discount_pct: number; is_available: boolean;
+      }>(
+        `SELECT title, category_slug, price_paise, duration_mins, discount_pct, is_available
+           FROM provider_services WHERE id = $1`,
+        [serviceId],
+      )
+      const { rows: pInfo } = await app.db.query<{
+        name: string; address: string | null; city_name: string; area_name: string | null;
+        likes_count: number; status: string; is_featured: boolean; is_boosted: boolean;
+      }>(
+        `SELECT p.name, p.address, c.name AS city_name, a.name AS area_name,
+                p.likes_count, p.status, p.is_featured, p.is_boosted
+           FROM providers p
+           JOIN cities c ON c.id = p.city_id
+           LEFT JOIN areas a ON a.id = p.area_id
+          WHERE p.id = $1`,
+        [ctx.providerId],
+      )
+      if (svc[0] && pInfo[0]) {
+        const discountedPricePaise = svc[0].discount_pct > 0
+          ? Math.round(svc[0].price_paise * (1 - svc[0].discount_pct / 100))
+          : svc[0].price_paise
+        void indexProviderService({
+          provider_id:   ctx.providerId,
+          provider_name: pInfo[0].name,
+          service_id:    serviceId,
+          service_title: svc[0].title,
+          category_slug: svc[0].category_slug,
+          address:       pInfo[0].address,
+          city_name:     pInfo[0].city_name,
+          area_name:     pInfo[0].area_name,
+          price_paise:   svc[0].price_paise,
+          duration_mins: svc[0].duration_mins,
+          likes_count:   pInfo[0].likes_count,
+          status:        pInfo[0].status,
+          updated_at:    new Date().toISOString(),
+          discount_pct:  svc[0].discount_pct,
+          discounted_price_paise: discountedPricePaise,
+          is_featured:   pInfo[0].is_featured,
+          is_boosted:    pInfo[0].is_boosted,
+        })
+      }
+
       return reply.send({ ok: true })
     },
   )
@@ -657,6 +785,41 @@ export async function providerPortalRoutes(app: FastifyInstance) {
          RETURNING id, category_slug, title, price_paise, duration_mins, is_available`,
         [ctx.providerId, categorySlug.trim(), title.trim(), pricePaise, durationMins],
       )
+
+      // Index into search service (fire-and-forget)
+      const { rows: pInfo } = await app.db.query<{
+        name:      string
+        address:   string | null
+        city_name: string
+        area_name: string | null
+        likes_count: number
+        status:    string
+      }>(
+        `SELECT p.name, p.address, c.name AS city_name, a.name AS area_name,
+                p.likes_count, p.status
+           FROM providers p
+           JOIN cities c ON c.id = p.city_id
+           LEFT JOIN areas a ON a.id = p.area_id
+          WHERE p.id = $1`,
+        [ctx.providerId],
+      )
+      if (pInfo[0]) {
+        void indexProviderService({
+          provider_id:   ctx.providerId,
+          provider_name: pInfo[0].name,
+          service_id:    rows[0].id,
+          service_title: rows[0].title,
+          category_slug: rows[0].category_slug,
+          address:       pInfo[0].address,
+          city_name:     pInfo[0].city_name,
+          area_name:     pInfo[0].area_name,
+          price_paise:   rows[0].price_paise,
+          duration_mins: rows[0].duration_mins,
+          likes_count:   pInfo[0].likes_count,
+          status:        pInfo[0].status,
+          updated_at:    new Date().toISOString(),
+        })
+      }
 
       return reply.status(201).send({ service: rows[0] })
     },

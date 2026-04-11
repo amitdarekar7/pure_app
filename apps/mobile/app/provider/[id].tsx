@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import {
   View,
   Text,
@@ -11,14 +11,22 @@ import {
   Platform,
   Image,
   useWindowDimensions,
+  FlatList,
+  Linking,
 } from 'react-native'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { ProvidersAPI, BookingsAPI, ProviderDetail } from '../../lib/api'
+import {
+  ProvidersAPI,
+  BookingsAPI,
+  ProviderDetail,
+  ProviderServiceItem,
+  ProviderImage,
+  ProviderAvailability,
+} from '../../lib/api'
 import { useAuth } from '../../lib/auth-context'
 
-// ─── placeholder gallery images (same for all providers until real upload exists) ──
-// Replace with actual uploaded images per provider from backend
-const GALLERY_IMAGES = [
+// ─── placeholder gallery images ──────────────────────────────────────────────
+const PLACEHOLDER_IMAGES = [
   require('../../assets/images/salon1.jpeg'),
   require('../../assets/images/salon2.jpeg'),
 ]
@@ -48,25 +56,28 @@ function dateLabel(d: Date) {
   return `${d.getDate()} ${MONTHS[d.getMonth()]}`
 }
 
-/** Return the Monday of the week containing `d` */
 function weekStart(d: Date): Date {
-  const day = d.getDay() // 0 Sun … 6 Sat
-  const diff = (day === 0 ? -6 : 1 - day)  // shift to Monday
+  const day = d.getDay()
+  const diff = (day === 0 ? -6 : 1 - day)
   const m = new Date(d)
   m.setDate(m.getDate() + diff)
   m.setHours(0, 0, 0, 0)
   return m
 }
 
-/** Return 7 consecutive dates starting from `monday` */
 function weekDates(monday: Date): Date[] {
   return Array.from({ length: 7 }, (_, i) => addDays(monday, i))
 }
 
-function buildTimeSlots(durationMins: number): string[] {
+function parseTime(t: string): number {
+  const [h, m] = t.split(':').map(Number)
+  return h * 60 + (m || 0)
+}
+
+function buildTimeSlots(durationMins: number, openTime?: string, closeTime?: string): string[] {
   const slots: string[] = []
-  const start = 9 * 60   // 9:00 AM
-  const end   = 19 * 60  // 7:00 PM
+  const start = openTime ? parseTime(openTime) : 9 * 60
+  const end   = closeTime ? parseTime(closeTime) : 21 * 60
   const step  = Math.max(durationMins, 30)
   for (let t = start; t + step <= end; t += step) {
     const h = Math.floor(t / 60)
@@ -79,7 +90,6 @@ function buildTimeSlots(durationMins: number): string[] {
 }
 
 function toISO(date: Date, timeSlot: string): string {
-  // timeSlot e.g. "9:00 AM"
   const [timePart, suffix] = timeSlot.split(' ')
   let [h, m] = timePart.split(':').map(Number)
   if (suffix === 'PM' && h !== 12) h += 12
@@ -91,7 +101,7 @@ function toISO(date: Date, timeSlot: string): string {
 
 // ─── component ────────────────────────────────────────────────────────────────
 
-export default function ProviderBookingPage() {
+export default function ProviderDetailPage() {
   const { id, sid, _date, _slot, _notes } = useLocalSearchParams<{
     id: string; sid: string
     _date?: string; _slot?: string; _notes?: string
@@ -99,79 +109,80 @@ export default function ProviderBookingPage() {
   const router = useRouter()
   const { isSignedIn, isLoading: authLoading } = useAuth()
   const { width } = useWindowDimensions()
-
-  // two-column when wide enough (tablet / web)
-  const isWide = width >= 720
+  const bannerRef = useRef<FlatList>(null)
 
   const [provider, setProvider]       = useState<ProviderDetail | null>(null)
+  const [services, setServices]       = useState<ProviderServiceItem[]>([])
+  const [images, setImages]           = useState<ProviderImage[]>([])
+  const [availability, setAvailability] = useState<ProviderAvailability[]>([])
   const [loading, setLoading]         = useState(true)
   const [error, setError]             = useState<string | null>(null)
-  const [activePhoto, setActivePhoto] = useState(0)
+  const [activeBanner, setActiveBanner] = useState(0)
 
-  // date selection — week-based calendar
+  // selected service — default to the one from URL params, or first service
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(sid ?? null)
+
+  // date/time/booking state
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  // restore from params (returned from login) or default to today
   const [selectedDate, setSelectedDate] = useState<Date>(() => {
-    if (_date) {
-      const d = new Date(_date)
-      if (!isNaN(d.getTime())) return d
-    }
+    if (_date) { const d = new Date(_date); if (!isNaN(d.getTime())) return d }
     return today
   })
-
   const [weekMonday, setWeekMonday] = useState<Date>(() => weekStart(selectedDate))
-
-  // time slot — restore from params
   const [selectedSlot, setSelectedSlot] = useState<string | null>(_slot ?? null)
-
-  // notes — restore from params
   const [notes, setNotes] = useState(_notes ?? '')
-
-  // booking state
   const [booking, setBooking]     = useState(false)
   const [booked, setBooked]       = useState(false)
   const [bookedISO, setBookedISO] = useState<string | null>(null)
+  const [bookedOtp, setBookedOtp] = useState<string | null>(null)
+  const [paymentMode, setPaymentMode] = useState<'prepaid' | 'pay_at_venue'>('prepaid')
 
-  // ── fetch provider detail ──
+  // ── fetch ──
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
     ProvidersAPI.get(id, sid)
-      .then(({ provider: p }) => {
-        if (!cancelled) setProvider(p)
+      .then((data) => {
+        if (cancelled) return
+        setProvider(data.provider)
+        setServices(data.services ?? [])
+        setImages(data.images ?? [])
+        setAvailability(data.availability ?? [])
+        if (!sid && data.services?.[0]) setSelectedServiceId(data.services[0].id)
       })
-      .catch(() => {
-        if (!cancelled) setError('Could not load provider. Please try again.')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+      .catch(() => { if (!cancelled) setError('Could not load provider.') })
+      .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [id, sid])
 
-  // ── reset slot when date changes ──
   useEffect(() => { setSelectedSlot(null) }, [selectedDate])
 
+  const selectedService = services.find(s => s.id === selectedServiceId) ?? null
   const currentWeek = weekDates(weekMonday)
   const prevWeekDisabled = weekMonday <= today
 
   function goToPrevWeek() {
     const prev = addDays(weekMonday, -7)
-    const clampedMonday = prev < today ? weekStart(today) : prev
-    setWeekMonday(clampedMonday)
+    setWeekMonday(prev < today ? weekStart(today) : prev)
   }
-
-  function goToNextWeek() {
-    setWeekMonday(addDays(weekMonday, 7))
-  }
+  function goToNextWeek() { setWeekMonday(addDays(weekMonday, 7)) }
 
   const now = new Date()
   const isToday = selectedDate.toDateString() === now.toDateString()
-  const timeSlots = provider
-    ? buildTimeSlots(provider.duration_mins).filter(slot => {
+
+  // day_of_week: 0=Sunday … 6=Saturday (matches JS getDay())
+  const dayAvail = availability.find(a => a.day_of_week === selectedDate.getDay())
+  const isDayClosed = dayAvail?.is_closed ?? false
+
+  const timeSlots = selectedService && !isDayClosed
+    ? buildTimeSlots(
+        selectedService.duration_mins,
+        dayAvail?.open_time,
+        dayAvail?.close_time,
+      ).filter(slot => {
         if (!isToday) return true
         const [timePart, suffix] = slot.split(' ')
         let [h, m] = timePart.split(':').map(Number)
@@ -183,41 +194,61 @@ export default function ProviderBookingPage() {
       })
     : []
 
+  // ── banner auto-scroll ──
+  const bannerImages = images.length > 0
+    ? images.map(img => ({ uri: img.image_url }))
+    : PLACEHOLDER_IMAGES
+  const bannerCount = bannerImages.length
+
+  useEffect(() => {
+    if (bannerCount <= 1) return
+    const interval = setInterval(() => {
+      setActiveBanner(prev => {
+        const next = (prev + 1) % bannerCount
+        bannerRef.current?.scrollToIndex({ index: next, animated: true })
+        return next
+      })
+    }, 3500)
+    return () => clearInterval(interval)
+  }, [bannerCount])
+
   // ── submit booking ──
   const handleBook = useCallback(async () => {
     if (!isSignedIn) {
-      // Build return URL with full current state so it's restored after login
-      const returnTo = `/provider/${encodeURIComponent(id)}?sid=${encodeURIComponent(sid)}` +
+      const returnTo = `/provider/${encodeURIComponent(id)}?sid=${encodeURIComponent(selectedServiceId ?? sid)}` +
         `&_date=${encodeURIComponent(selectedDate.toISOString())}` +
         (selectedSlot ? `&_slot=${encodeURIComponent(selectedSlot)}` : '') +
         (notes.trim() ? `&_notes=${encodeURIComponent(notes.trim())}` : '')
       router.push({ pathname: '/(auth)/login', params: { returnTo } } as any)
       return
     }
-    if (!provider || !selectedSlot) return
+    if (!selectedService || !selectedSlot) return
     setBooking(true)
     try {
       const iso = toISO(selectedDate, selectedSlot)
-      await BookingsAPI.create({
-        providerServiceId: provider.service_id,
+      const { booking: bk } = await BookingsAPI.create({
+        providerServiceId: selectedService.id,
         scheduledAt: iso,
         notes: notes.trim() || undefined,
+        paymentMode,
       })
       setBookedISO(iso)
+      setBookedOtp(bk.checkin_otp ?? null)
       setBooked(true)
     } catch (err: any) {
-      const msg = err?.message ?? 'Booking failed. Please try again.'
-      Alert.alert('Error', msg)
+      Alert.alert('Error', err?.message ?? 'Booking failed. Please try again.')
     } finally {
       setBooking(false)
     }
-  }, [provider, selectedSlot, selectedDate, notes])
+  }, [selectedService, selectedSlot, selectedDate, notes, paymentMode, isSignedIn])
+
+  const canBook = !!selectedSlot && !!selectedService
 
   // ── loading ──
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#7c6af7" />
+        <ActivityIndicator size="large" color={ORANGE} />
       </View>
     )
   }
@@ -243,13 +274,20 @@ export default function ProviderBookingPage() {
           <Text style={styles.successIcon}>✓</Text>
           <Text style={styles.successTitle}>Booking Requested!</Text>
           <Text style={styles.successSub}>{provider.name}</Text>
-          <Text style={styles.successDetail}>{provider.service_title}</Text>
+          <Text style={styles.successDetail}>{selectedService?.title}</Text>
           <Text style={styles.successDetail}>
             {dayLabel(dt)}, {dateLabel(dt)} · {selectedSlot}
           </Text>
           <Text style={styles.successNote}>
             The provider will confirm your booking soon.
           </Text>
+          {bookedOtp && (
+            <View style={styles.otpCard}>
+              <Text style={styles.otpLabel}>Your Check-in OTP</Text>
+              <Text style={styles.otpCode}>{bookedOtp}</Text>
+              <Text style={styles.otpHint}>Share this with the provider when you arrive</Text>
+            </View>
+          )}
           <Pressable style={styles.doneBtn} onPress={() => router.replace('/(tabs)/bookings' as any)}>
             <Text style={styles.doneBtnText}>View My Bookings</Text>
           </Pressable>
@@ -258,503 +296,590 @@ export default function ProviderBookingPage() {
     )
   }
 
-  // ── main booking page ──
-  const initial = provider.name.charAt(0).toUpperCase()
-  const canBook = !!selectedSlot
+  const location = [provider.area_name, provider.city_name].filter(Boolean).join(', ')
 
-  // ── booking panel (shared between narrow and wide layouts) ──
-  const BookingPanel = (
-    <ScrollView
-      style={styles.bookingScroll}
-      contentContainerStyle={styles.bookingScrollContent}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* ── selected service highlight ── */}
-      <View style={styles.serviceBadge}>
-        <View style={styles.serviceBadgeLeft}>
-          <Text style={styles.serviceBadgeLabel}>Booking for</Text>
-          <Text style={styles.serviceBadgeTitle}>{provider.service_title}</Text>
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  MAIN RENDER — Swiggy-inspired layout
+  // ═══════════════════════════════════════════════════════════════════════════
+  return (
+    <View style={styles.root}>
+      {/* ── sticky header ── */}
+      <View style={styles.header}>
+        <Pressable style={styles.headerBackBtn} onPress={() => router.back()}>
+          <Text style={styles.headerBackArrow}>←</Text>
+        </Pressable>
+        <View style={styles.headerInfo}>
+          <Text style={styles.headerName} numberOfLines={1}>{provider.name}</Text>
+          {location ? <Text style={styles.headerLocation} numberOfLines={1}>{location}</Text> : null}
         </View>
-        <View style={styles.serviceBadgeRight}>
-          <Text style={styles.serviceBadgePrice}>{formatRupees(provider.price_paise)}</Text>
-          <Text style={styles.serviceBadgeDuration}>{provider.duration_mins} min</Text>
-        </View>
+        <Pressable onPress={() => provider.phone && Linking.openURL(`tel:${provider.phone}`)}>
+          <Text style={styles.headerAction}>{provider.phone ? '📞' : ''}</Text>
+        </Pressable>
       </View>
 
-      {/* weekly calendar */}
-      <View style={styles.calendarCard}>
-        <View style={styles.calendarHeader}>
-          <Pressable
-            style={[styles.calNavBtn, prevWeekDisabled && styles.calNavBtnDisabled]}
-            onPress={goToPrevWeek}
-            disabled={prevWeekDisabled}
-          >
-            <Text style={[styles.calNavArrow, prevWeekDisabled && styles.calNavArrowDisabled]}>‹</Text>
-          </Pressable>
-          <Text style={styles.calMonthLabel}>
-            {MONTHS_FULL[currentWeek[0].getMonth()]} {currentWeek[0].getFullYear()}
-            {currentWeek[0].getMonth() !== currentWeek[6].getMonth()
-              ? ` / ${MONTHS_FULL[currentWeek[6].getMonth()]}`
-              : ''}
-          </Text>
-          <Pressable style={styles.calNavBtn} onPress={goToNextWeek}>
-            <Text style={styles.calNavArrow}>›</Text>
-          </Pressable>
+      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+        {/* ════════════════════════════════════════════════════════════════════
+            1. BANNER — Sliding hero images
+         ════════════════════════════════════════════════════════════════════ */}
+        <View style={styles.bannerWrap}>
+          <FlatList
+            ref={bannerRef}
+            data={bannerImages}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            keyExtractor={(_, i) => String(i)}
+            onMomentumScrollEnd={(e) => {
+              const idx = Math.round(e.nativeEvent.contentOffset.x / width)
+              setActiveBanner(idx)
+            }}
+            renderItem={({ item }) => (
+              <Image
+                source={typeof item === 'number' ? item : { uri: item.uri }}
+                style={[styles.bannerImage, { width }]}
+                resizeMode="cover"
+              />
+            )}
+          />
+          {/* dot indicators */}
+          {bannerCount > 1 && (
+            <View style={styles.dotsRow}>
+              {bannerImages.map((_, i) => (
+                <View key={i} style={[styles.dot, i === activeBanner && styles.dotActive]} />
+              ))}
+            </View>
+          )}
+          {/* image counter badge */}
+          {bannerCount > 1 && (
+            <View style={styles.imgCountBadge}>
+              <Text style={styles.imgCountText}>{activeBanner + 1}/{bannerCount}</Text>
+            </View>
+          )}
         </View>
-        <View style={styles.calDayRow}>
-          {DAYS_SHORT.map(d => (
-            <Text key={d} style={styles.calDayName}>{d}</Text>
-          ))}
+
+        {/* ════════════════════════════════════════════════════════════════════
+            2. PROVIDER INFO CARD
+         ════════════════════════════════════════════════════════════════════ */}
+        <View style={styles.infoCard}>
+          <Text style={styles.providerName}>{provider.name}</Text>
+          <View style={styles.infoPills}>
+            {location ? <Text style={styles.infoLocation}>📍 {location}</Text> : null}
+            {provider.address ? <Text style={styles.infoAddress}>{provider.address}</Text> : null}
+          </View>
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>❤️ {provider.likes_count}</Text>
+              <Text style={styles.statLabel}>Likes</Text>
+            </View>
+            {provider.is_featured && (
+              <View style={[styles.statItem, styles.featuredBadge]}>
+                <Text style={styles.featuredText}>⭐ Featured</Text>
+              </View>
+            )}
+          </View>
         </View>
-        <View style={styles.calDayRow}>
-          {currentWeek.map((d, i) => {
-            const sel  = d.toDateString() === selectedDate.toDateString()
-            const past = d < today
+
+        {/* ════════════════════════════════════════════════════════════════════
+            3. OFFERS BANNER (if discount exists on selected service)
+         ════════════════════════════════════════════════════════════════════ */}
+        {selectedService && selectedService.discount_pct > 0 && (
+          <View style={styles.offerBanner}>
+            <View style={styles.offerBadge}>
+              <Text style={styles.offerBadgeText}>OFFER</Text>
+            </View>
+            <View style={styles.offerContent}>
+              <Text style={styles.offerTitle}>
+                Flat {selectedService.discount_pct}% OFF
+              </Text>
+              <Text style={styles.offerSub}>on prepaid booking</Text>
+            </View>
+          </View>
+        )}
+
+        {/* ════════════════════════════════════════════════════════════════════
+            4. SERVICES LIST
+         ════════════════════════════════════════════════════════════════════ */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeading}>Services</Text>
+          {services.map((svc) => {
+            const selected = svc.id === selectedServiceId
+            const hasDiscount = svc.discount_pct > 0 && svc.discounted_price_paise != null
             return (
               <Pressable
-                key={i}
-                style={styles.calDayCell}
-                onPress={() => { if (!past) setSelectedDate(d) }}
-                disabled={past}
+                key={svc.id}
+                style={[styles.serviceRow, selected && styles.serviceRowSelected]}
+                onPress={() => { setSelectedServiceId(svc.id); setSelectedSlot(null) }}
               >
-                <View style={[styles.calDayCircle, sel && styles.calDayCircleSel, past && styles.calDayCirclePast]}>
-                  <Text style={[styles.calDayNum, sel && styles.calDayNumSel, past && styles.calDayNumPast]}>
-                    {d.getDate()}
+                <View style={styles.serviceInfo}>
+                  <View style={styles.serviceNameRow}>
+                    {selected && <View style={styles.radioSelected}><View style={styles.radioInner} /></View>}
+                    {!selected && <View style={styles.radio} />}
+                    <Text style={[styles.serviceName, selected && styles.serviceNameActive]}>
+                      {svc.title}
+                    </Text>
+                  </View>
+                  <Text style={styles.serviceMeta}>
+                    {svc.category_slug} · {svc.duration_mins} min
                   </Text>
+                  {hasDiscount && (
+                    <View style={styles.serviceDiscountTag}>
+                      <Text style={styles.serviceDiscountText}>{svc.discount_pct}% OFF</Text>
+                    </View>
+                  )}
                 </View>
-                <Text style={[styles.calDayMon, sel && styles.calDayMonSel, past && styles.calDayNumPast]}>
-                  {MONTHS[d.getMonth()]}
-                </Text>
+                <View style={styles.servicePriceBlock}>
+                  {hasDiscount ? (
+                    <>
+                      <Text style={styles.servicePriceStrike}>{formatRupees(svc.price_paise)}</Text>
+                      <Text style={styles.servicePriceDiscount}>{formatRupees(svc.discounted_price_paise!)}</Text>
+                    </>
+                  ) : (
+                    <Text style={styles.servicePrice}>{formatRupees(svc.price_paise)}</Text>
+                  )}
+                </View>
               </Pressable>
             )
           })}
         </View>
-      </View>
 
-      {/* time slots */}
-      <Text style={styles.sectionTitle}>Select a time slot</Text>
-      <View style={styles.slotsGrid}>
-        {timeSlots.map((slot) => {
-          const sel = slot === selectedSlot
-          return (
-            <Pressable
-              key={slot}
-              style={[styles.slotPill, sel && styles.slotPillSel]}
-              onPress={() => setSelectedSlot(sel ? null : slot)}
-            >
-              <Text style={[styles.slotText, sel && styles.slotTextSel]}>{slot}</Text>
-            </Pressable>
-          )
-        })}
-      </View>
+        {/* ════════════════════════════════════════════════════════════════════
+            5. BOOKING SECTION — only if a service is selected
+         ════════════════════════════════════════════════════════════════════ */}
+        {selectedService && (
+          <View style={styles.section}>
+            <Text style={styles.sectionHeading}>Book Appointment</Text>
 
-      {/* notes */}
-      <Text style={styles.sectionTitle}>Notes <Text style={styles.optionalLabel}>(optional)</Text></Text>
-      <TextInput
-        style={styles.notesInput}
-        placeholder="Any special requests or notes for the provider…"
-        placeholderTextColor="#aaa"
-        multiline
-        numberOfLines={3}
-        value={notes}
-        onChangeText={setNotes}
-        maxLength={500}
-      />
-
-      {/* CTA inside scroll on narrow, also shown below on wide */}
-      {!isWide && (
-        <View style={styles.ctaInline}>
-          {!authLoading && !isSignedIn ? (
-            <>
-              <Text style={styles.loginPrompt}>Please login to book an appointment</Text>
-              <Pressable style={styles.bookBtn} onPress={handleBook}>
-                <Text style={styles.bookBtnText}>Login to Book</Text>
+            {/* ── Payment mode ── */}
+            <Text style={styles.subHeading}>Payment method</Text>
+            <View style={styles.payModeOptions}>
+              <Pressable
+                style={[styles.payModeOption, paymentMode === 'prepaid' && styles.payModeSelected]}
+                onPress={() => setPaymentMode('prepaid')}
+              >
+                <Text style={styles.payModeIcon}>📱</Text>
+                <Text style={[styles.payModeLabel, paymentMode === 'prepaid' && styles.payModeLabelSel]}>
+                  Pay via App
+                </Text>
               </Pressable>
-            </>
-          ) : (
-            <Pressable
-              style={[styles.bookBtn, !canBook && styles.bookBtnDisabled]}
-              onPress={handleBook}
-              disabled={!canBook || booking}
-            >
-              {booking
-                ? <ActivityIndicator color="#fff" size="small" />
-                : <Text style={styles.bookBtnText}>
-                    {canBook ? `Request Booking · ${selectedSlot}` : 'Select a time slot'}
-                  </Text>
-              }
-            </Pressable>
-          )}
-        </View>
-      )}
+              <Pressable
+                style={[styles.payModeOption, paymentMode === 'pay_at_venue' && styles.payModeSelected]}
+                onPress={() => setPaymentMode('pay_at_venue')}
+              >
+                <Text style={styles.payModeIcon}>💳</Text>
+                <Text style={[styles.payModeLabel, paymentMode === 'pay_at_venue' && styles.payModeLabelSel]}>
+                  Pay at Venue
+                </Text>
+              </Pressable>
+            </View>
 
-      <View style={{ height: isWide ? 32 : 100 }} />
-    </ScrollView>
-  )
+            {/* ── Calendar ── */}
+            <View style={styles.calendarCard}>
+              <View style={styles.calendarHeader}>
+                <Pressable
+                  style={[styles.calNavBtn, prevWeekDisabled && styles.calNavBtnDisabled]}
+                  onPress={goToPrevWeek}
+                  disabled={prevWeekDisabled}
+                >
+                  <Text style={[styles.calNavArrow, prevWeekDisabled && { color: '#ccc' }]}>‹</Text>
+                </Pressable>
+                <Text style={styles.calMonthLabel}>
+                  {MONTHS_FULL[currentWeek[0].getMonth()]} {currentWeek[0].getFullYear()}
+                  {currentWeek[0].getMonth() !== currentWeek[6].getMonth()
+                    ? ` / ${MONTHS_FULL[currentWeek[6].getMonth()]}` : ''}
+                </Text>
+                <Pressable style={styles.calNavBtn} onPress={goToNextWeek}>
+                  <Text style={styles.calNavArrow}>›</Text>
+                </Pressable>
+              </View>
+              <View style={styles.calDayRow}>
+                {DAYS_SHORT.map(d => <Text key={d} style={styles.calDayName}>{d}</Text>)}
+              </View>
+              <View style={styles.calDayRow}>
+                {currentWeek.map((d, i) => {
+                  const sel  = d.toDateString() === selectedDate.toDateString()
+                  const past = d < today
+                  const dayClosed = availability.find(a => a.day_of_week === d.getDay())?.is_closed ?? false
+                  return (
+                    <Pressable key={i} style={styles.calDayCell} onPress={() => !past && setSelectedDate(d)} disabled={past}>
+                      <View style={[styles.calDayCircle, sel && styles.calDayCircleSel, past && { opacity: 0.35 }, dayClosed && !sel && { opacity: 0.4 }]}>
+                        <Text style={[styles.calDayNum, sel && { color: '#fff' }, past && { color: '#bbb' }]}>{d.getDate()}</Text>
+                      </View>
+                      {dayClosed
+                        ? <Text style={styles.calDayClosed}>Closed</Text>
+                        : <Text style={[styles.calDayMon, sel && { color: ORANGE, fontWeight: '700' }]}>{MONTHS[d.getMonth()]}</Text>
+                      }
+                    </Pressable>
+                  )
+                })}
+              </View>
+            </View>
 
-  // ── photo gallery panel ──
-  const GalleryPanel = (
-    <View style={styles.galleryPanel}>
-      {/* main photo */}
-      <Image
-        source={GALLERY_IMAGES[activePhoto]}
-        style={styles.galleryMainPhoto}
-        resizeMode="cover"
-      />
-      {/* slide arrows */}
-      {GALLERY_IMAGES.length > 1 && (
-        <>
-          <Pressable
-            style={[styles.galleryArrow, styles.galleryArrowLeft]}
-            onPress={() => setActivePhoto(prev => (prev - 1 + GALLERY_IMAGES.length) % GALLERY_IMAGES.length)}
-          >
-            <Text style={styles.galleryArrowText}>‹</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.galleryArrow, styles.galleryArrowRight]}
-            onPress={() => setActivePhoto(prev => (prev + 1) % GALLERY_IMAGES.length)}
-          >
-            <Text style={styles.galleryArrowText}>›</Text>
-          </Pressable>
-        </>
-      )}
-      {/* thumbnail strip */}
-      <View style={styles.galleryThumbs}>
-        {GALLERY_IMAGES.map((img, i) => (
-          <Pressable key={i} onPress={() => setActivePhoto(i)}>
-            <Image
-              source={img}
-              style={[styles.galleryThumb, activePhoto === i && styles.galleryThumbActive]}
-              resizeMode="cover"
+            {/* ── Time slots ── */}
+            <Text style={styles.subHeading}>Select a time slot</Text>
+            {isDayClosed ? (
+              <View style={styles.closedBanner}>
+                <Text style={styles.closedBannerText}>🚫 Closed on {DAYS_FULL[selectedDate.getDay()]}s</Text>
+              </View>
+            ) : timeSlots.length === 0 ? (
+              <View style={styles.closedBanner}>
+                <Text style={styles.closedBannerText}>No slots available for this day</Text>
+              </View>
+            ) : (() => {
+              const morning = timeSlots.filter(s => s.endsWith('AM'))
+              const afternoon = timeSlots.filter(s => {
+                const h = parseInt(s)
+                return s.endsWith('PM') && (h === 12 || h < 5)
+              })
+              const evening = timeSlots.filter(s => {
+                const h = parseInt(s)
+                return s.endsWith('PM') && h >= 5 && h !== 12
+              })
+              const groups = [
+                { label: '🌅 Morning', slots: morning },
+                { label: '☀️ Afternoon', slots: afternoon },
+                { label: '🌇 Evening', slots: evening },
+              ].filter(g => g.slots.length > 0)
+              return groups.map(group => (
+                <View key={group.label} style={styles.slotGroup}>
+                  <Text style={styles.slotGroupLabel}>{group.label}</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.slotScrollContent}>
+                    {group.slots.map(slot => {
+                      const sel = slot === selectedSlot
+                      return (
+                        <Pressable
+                          key={slot}
+                          style={[styles.slotChip, sel && styles.slotChipSel]}
+                          onPress={() => setSelectedSlot(sel ? null : slot)}
+                        >
+                          <Text style={[styles.slotChipText, sel && styles.slotChipTextSel]}>{slot}</Text>
+                        </Pressable>
+                      )
+                    })}
+                  </ScrollView>
+                </View>
+              ))
+            })()}
+
+            {/* ── Notes ── */}
+            <Text style={styles.subHeading}>Notes <Text style={{ fontWeight: '400', color: '#aaa' }}>(optional)</Text></Text>
+            <TextInput
+              style={styles.notesInput}
+              placeholder="Any special requests…"
+              placeholderTextColor="#bbb"
+              multiline
+              numberOfLines={3}
+              value={notes}
+              onChangeText={setNotes}
+              maxLength={500}
             />
-          </Pressable>
-        ))}
-      </View>
-      {/* provider name overlay */}
-      <View style={styles.galleryOverlay}>
-        <View style={styles.galleryAvatarCircle}>
-          <Text style={styles.galleryAvatarText}>{initial}</Text>
+          </View>
+        )}
+
+        {/* ════════════════════════════════════════════════════════════════════
+            6. PHOTOS — Horizontal sliding carousel
+         ════════════════════════════════════════════════════════════════════ */}
+        <View style={styles.photosSection}>
+          <Text style={[styles.sectionHeading, { paddingHorizontal: 16 }]}>Photos</Text>
+          <FlatList
+            data={images.length > 0
+              ? images.map(img => ({ key: img.id, source: { uri: img.image_url } }))
+              : PLACEHOLDER_IMAGES.map((src, i) => ({ key: `ph-${i}`, source: src }))
+            }
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.photosListContent}
+            keyExtractor={(item) => item.key}
+            renderItem={({ item }) => (
+              <View style={styles.photoCard}>
+                <Image source={item.source} style={styles.photoCardImage} resizeMode="cover" />
+              </View>
+            )}
+          />
         </View>
-        <View>
-          <Text style={styles.galleryOverlayName}>{provider.name}</Text>
-          {(provider.area_name || provider.city_name) && (
-            <Text style={styles.galleryOverlayLocation}>
-              {[provider.area_name, provider.city_name].filter(Boolean).join(', ')}
-            </Text>
+
+        {/* ════════════════════════════════════════════════════════════════════
+            7. LOCATION
+         ════════════════════════════════════════════════════════════════════ */}
+        <View style={styles.section}>
+          <Text style={styles.sectionHeading}>Location</Text>
+          {provider.address && (
+            <View style={styles.locationRow}>
+              <Text style={styles.locationPin}>📍</Text>
+              <Text style={styles.locationText}>{provider.address}</Text>
+            </View>
+          )}
+          {location && !provider.address && (
+            <View style={styles.locationRow}>
+              <Text style={styles.locationPin}>📍</Text>
+              <Text style={styles.locationText}>{location}</Text>
+            </View>
+          )}
+          {provider.phone && (
+            <Pressable
+              style={styles.locationRow}
+              onPress={() => Linking.openURL(`tel:${provider.phone}`)}
+            >
+              <Text style={styles.locationPin}>📞</Text>
+              <Text style={[styles.locationText, { color: ORANGE }]}>{provider.phone}</Text>
+            </Pressable>
           )}
         </View>
-      </View>
-    </View>
-  )
 
-  return (
-    <View style={styles.root}>
-      {/* ── header ── */}
-      <View style={styles.header}>
-        <Pressable style={styles.backBtn} onPress={() => router.back()}>
-          <Text style={styles.backArrow}>←</Text>
-        </Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>{provider.name}</Text>
-        <View style={styles.backBtn} />
-      </View>
+        {/* ════════════════════════════════════════════════════════════════════
+            8. HELP & SUPPORT
+         ════════════════════════════════════════════════════════════════════ */}
+        <View style={styles.helpCard}>
+          <Text style={styles.helpText}>Have queries or need help with something?</Text>
+          <Text style={styles.helpLink}>View help & support ›</Text>
+        </View>
 
-      {isWide ? (
-        /* ── wide: two-column side-by-side ── */
-        <View style={{ flex: 1 }}>
-          <View style={styles.wideLayout}>
-            <View style={styles.wideLeft}>
-              {GalleryPanel}
-            </View>
-            <View style={styles.wideDivider} />
-            <View style={styles.wideRight}>
-              {BookingPanel}
-            </View>
+        <View style={{ height: 120 }} />
+      </ScrollView>
+
+      {/* ── Sticky bottom CTA ── */}
+      <View style={styles.ctaBar}>
+        {selectedService && (
+          <View style={styles.ctaSummary}>
+            <Text style={styles.ctaServiceName} numberOfLines={1}>{selectedService.title}</Text>
+            <Text style={styles.ctaPrice}>
+              {selectedService.discounted_price_paise
+                ? formatRupees(selectedService.discounted_price_paise)
+                : formatRupees(selectedService.price_paise)}
+            </Text>
           </View>
-          {/* full-width CTA spanning both columns */}
-          <View style={styles.ctaBarFull}>
-            {!authLoading && !isSignedIn ? (
-              <>
-                <Text style={styles.loginPrompt}>Please login to book an appointment</Text>
-                <Pressable style={styles.bookBtn} onPress={handleBook}>
-                  <Text style={styles.bookBtnText}>Login to Book</Text>
-                </Pressable>
-              </>
-            ) : (
-              <Pressable
-                style={[styles.bookBtn, !canBook && styles.bookBtnDisabled]}
-                onPress={handleBook}
-                disabled={!canBook || booking}
-              >
-                {booking
-                  ? <ActivityIndicator color="#fff" size="small" />
-                  : <Text style={styles.bookBtnText}>
-                      {canBook ? `Request Booking · ${selectedSlot}` : 'Select a time slot'}
-                    </Text>
-                }
-              </Pressable>
-            )}
-          </View>
-        </View>
-      ) : (
-        /* ── narrow: gallery stacked above booking ── */
-        <View style={{ flex: 1 }}>
-          <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-            {/* gallery at top */}
-            <View style={styles.narrowPhotoWrap}>
-              <Image
-                source={GALLERY_IMAGES[activePhoto]}
-                style={styles.narrowMainPhoto}
-                resizeMode="cover"
-              />
-              {GALLERY_IMAGES.length > 1 && (
-                <>
-                  <Pressable
-                    style={[styles.galleryArrow, styles.galleryArrowLeft]}
-                    onPress={() => setActivePhoto(prev => (prev - 1 + GALLERY_IMAGES.length) % GALLERY_IMAGES.length)}
-                  >
-                    <Text style={styles.galleryArrowText}>‹</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.galleryArrow, styles.galleryArrowRight]}
-                    onPress={() => setActivePhoto(prev => (prev + 1) % GALLERY_IMAGES.length)}
-                  >
-                    <Text style={styles.galleryArrowText}>›</Text>
-                  </Pressable>
-                </>
-              )}
-            </View>
-            <View style={styles.narrowThumbs}>
-              {GALLERY_IMAGES.map((img, i) => (
-                <Pressable key={i} onPress={() => setActivePhoto(i)}>
-                  <Image
-                    source={img}
-                    style={[styles.narrowThumb, activePhoto === i && styles.galleryThumbActive]}
-                    resizeMode="cover"
-                  />
-                </Pressable>
-              ))}
-            </View>
-            <View style={styles.scrollContent}>
-              {BookingPanel}
-            </View>
-          </ScrollView>
-          {/* sticky CTA bar */}
-          <View style={styles.ctaBar}>
-            {!authLoading && !isSignedIn ? (
-              <>
-                <Text style={styles.loginPrompt}>Please login to book an appointment</Text>
-                <Pressable style={styles.bookBtn} onPress={handleBook}>
-                  <Text style={styles.bookBtnText}>Login to Book</Text>
-                </Pressable>
-              </>
-            ) : (
-              <Pressable
-                style={[styles.bookBtn, !canBook && styles.bookBtnDisabled]}
-                onPress={handleBook}
-                disabled={!canBook || booking}
-              >
-                {booking
-                  ? <ActivityIndicator color="#fff" size="small" />
-                  : <Text style={styles.bookBtnText}>
-                      {canBook ? `Request Booking · ${selectedSlot}` : 'Select a time slot'}
-                    </Text>
-                }
-              </Pressable>
-            )}
-          </View>
-        </View>
-      )}
+        )}
+        {!authLoading && !isSignedIn ? (
+          <Pressable style={styles.ctaBtn} onPress={handleBook}>
+            <Text style={styles.ctaBtnText}>Login to Book</Text>
+          </Pressable>
+        ) : (
+          <Pressable
+            style={[styles.ctaBtn, !canBook && styles.ctaBtnDisabled]}
+            onPress={handleBook}
+            disabled={!canBook || booking}
+          >
+            {booking
+              ? <ActivityIndicator color="#fff" size="small" />
+              : <Text style={styles.ctaBtnText}>
+                  {canBook ? `Book Now · ${selectedSlot}` : 'Select a time slot'}
+                </Text>
+            }
+          </Pressable>
+        )}
+      </View>
     </View>
   )
 }
 
-// ─── styles ───────────────────────────────────────────────────────────────────
+// ─── theme ────────────────────────────────────────────────────────────────────
 
-const PURPLE    = '#7c6af7'
-const PURPLE_BG = '#f4f0ff'
-const PURPLE_BD = '#c0b8f0'
+const ORANGE    = '#E8590C'
+const ORANGE_BG = '#FFF4ED'
+const DARK      = '#1B1B1B'
+const GREY      = '#686B78'
+const LIGHT_BG  = '#F1F1F6'
+const BORDER    = '#E9E9EB'
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f8f8f8' },
+  root: { flex: 1, backgroundColor: '#fff' },
 
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f8f8', padding: 24 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', padding: 24 },
   errorText: { color: '#e55', fontSize: 15, textAlign: 'center', marginBottom: 16 },
-  retryBtn: { backgroundColor: PURPLE, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 24 },
+  retryBtn: { backgroundColor: ORANGE, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 24 },
   retryBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 
-  // ── header ──
+  // ── header (Swiggy-style) ──
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: Platform.OS === 'ios' ? 56 : 16,
-    paddingBottom: 14,
+    paddingTop: Platform.OS === 'ios' ? 54 : 12,
+    paddingBottom: 12,
     paddingHorizontal: 16,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: BORDER,
     zIndex: 10,
   },
-  backBtn: { width: 36, height: 36, justifyContent: 'center' },
-  backArrow: { fontSize: 22, color: PURPLE, fontWeight: '700' },
-  headerTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700', color: '#1a1a1a' },
+  headerBackBtn: { width: 36, height: 36, justifyContent: 'center' },
+  headerBackArrow: { fontSize: 22, color: DARK, fontWeight: '700' },
+  headerInfo: { flex: 1, marginLeft: 4 },
+  headerName: { fontSize: 16, fontWeight: '800', color: DARK },
+  headerLocation: { fontSize: 12, color: GREY, marginTop: 1 },
+  headerAction: { fontSize: 20, width: 36, textAlign: 'center' },
 
-  // ── wide two-column layout ──
-  wideLayout: { flex: 1, flexDirection: 'row' },
-  wideDivider: { width: 0 },
-  wideLeft: { flex: 5, maxWidth: 520 },
-  wideRight: { flex: 7, backgroundColor: '#fff' },
-
-  // ── gallery panel (wide) ──
-  galleryPanel: {
-    flex: 1,
-    backgroundColor: '#f8f8f8',
-    position: 'relative',
-    overflow: 'hidden',
-    // @ts-ignore web-only — fades all 4 edges + corners so the image dissolves
-    // smoothly into the page rather than hard-cutting
-    WebkitMaskImage:
-      'radial-gradient(ellipse 88% 92% at 44% 50%, black 55%, transparent 100%)',
-    maskImage:
-      'radial-gradient(ellipse 88% 92% at 44% 50%, black 55%, transparent 100%)',
-  },
-  galleryMainPhoto: { width: '100%', flex: 1 },
-  vignetteEdge: { position: 'absolute' },
-  galleryThumbs: {
-    flexDirection: 'row',
-    gap: 8,
-    padding: 10,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    position: 'absolute',
-    bottom: 80,
-    left: 0,
-    right: 0,
-  },
-  galleryThumb: {
-    width: 72,
-    height: 52,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  galleryThumbActive: { borderColor: PURPLE },
-  galleryOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 16,
-    paddingBottom: 20,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  galleryAvatarCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#fdf0f4',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  galleryAvatarText: { fontSize: 18, fontWeight: '800', color: '#c06080' },
-  galleryOverlayName: { color: '#fff', fontWeight: '800', fontSize: 16 },
-  galleryOverlayLocation: { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginTop: 2 },
-
-  // ── narrow layout ──
   scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 8, width: '100%', maxWidth: 520, alignSelf: 'center' },
-  narrowPhotoWrap: { position: 'relative' },
-  narrowMainPhoto: { width: '100%', height: 220 },
-  narrowThumbs: {
+
+  // ── 1. banner ──
+  bannerWrap: { position: 'relative', backgroundColor: '#f5f5f5' },
+  bannerImage: { height: 260 },
+  dotsRow: {
     flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: '#1a1a1a',
+    position: 'absolute',
+    bottom: 14,
+    alignSelf: 'center',
+    gap: 6,
   },
-  narrowThumb: {
-    width: 68,
-    height: 50,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: 'transparent',
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.5)' },
+  dotActive: { backgroundColor: '#fff', width: 20 },
+  imgCountBadge: {
+    position: 'absolute',
+    bottom: 14,
+    right: 14,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
+  imgCountText: { color: '#fff', fontSize: 11, fontWeight: '700' },
 
-  // ── booking scroll (inside wideRight) ──
-  bookingScroll: { flex: 1 },
-  bookingScrollContent: { padding: 16 },
-
-  // ── provider card ──
-  providerCard: {
+  // ── 2. provider info card ──
+  infoCard: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
     backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+  providerName: { fontSize: 22, fontWeight: '900', color: DARK, marginBottom: 6 },
+  infoPills: { marginBottom: 10 },
+  infoLocation: { fontSize: 13, color: GREY, marginBottom: 2 },
+  infoAddress: { fontSize: 12, color: '#93959F', marginTop: 2 },
+  statsRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
+  statItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  statValue: { fontSize: 13, fontWeight: '700', color: DARK },
+  statLabel: { fontSize: 11, color: GREY },
+  featuredBadge: {
+    backgroundColor: '#FFF9E6',
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  featuredText: { fontSize: 11, fontWeight: '700', color: '#B76E00' },
+
+  // ── 3. offer banner ──
+  offerBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: ORANGE_BG,
+    borderRadius: 12,
+    padding: 14,
+    gap: 12,
     borderWidth: 1,
-    borderColor: '#f0f0f0',
+    borderColor: '#FFDAC8',
   },
-  avatarCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#fdf0f4',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-    flexShrink: 0,
+  offerBadge: {
+    backgroundColor: ORANGE,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
-  avatarText: { fontSize: 17, fontWeight: '800', color: '#c06080' },
-  providerInfo: { flex: 1 },
-  providerName: { fontSize: 15, fontWeight: '800', color: '#1a1a1a', marginBottom: 2 },
-  providerLocation: { fontSize: 11, color: '#888', marginBottom: 2 },
-  providerService: { fontSize: 11, fontWeight: '600', color: '#757575' },
-  providerPriceBlock: { alignItems: 'flex-end' },
-  providerPrice: { fontSize: 15, fontWeight: '800', color: '#1a1a1a' },
-  providerDuration: { fontSize: 11, color: '#888', marginTop: 2 },
+  offerBadgeText: { fontSize: 10, fontWeight: '900', color: '#fff', letterSpacing: 0.5 },
+  offerContent: {},
+  offerTitle: { fontSize: 16, fontWeight: '900', color: DARK },
+  offerSub: { fontSize: 12, color: GREY, marginTop: 2 },
 
-  // ── section ──
-  sectionTitle: { fontSize: 13, fontWeight: '700', color: '#1a1a1a', marginBottom: 10, letterSpacing: 0.2 },
-  optionalLabel: { fontWeight: '400', color: '#aaa' },
-
-  // ── service badge ──
-  serviceBadge: {
+  // ── 4. services ──
+  section: {
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 8,
+  },
+  sectionHeading: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: DARK,
+    marginBottom: 14,
+    letterSpacing: -0.3,
+  },
+  serviceRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#f0edff',
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: '#c0b8f0',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginBottom: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+    marginBottom: 10,
+    backgroundColor: '#fff',
   },
-  serviceBadgeLeft: { flex: 1 },
-  serviceBadgeLabel: { fontSize: 10, fontWeight: '700', color: '#9b8fe0', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 3 },
-  serviceBadgeTitle: { fontSize: 15, fontWeight: '800', color: '#4a3db5' },
-  serviceBadgeRight: { alignItems: 'flex-end', marginLeft: 12 },
-  serviceBadgePrice: { fontSize: 16, fontWeight: '900', color: '#4a3db5' },
-  serviceBadgeDuration: { fontSize: 11, color: '#9b8fe0', marginTop: 2 },
+  serviceRowSelected: {
+    borderColor: ORANGE,
+    backgroundColor: ORANGE_BG,
+  },
+  serviceInfo: { flex: 1, marginRight: 12 },
+  serviceNameRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
+  radio: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: '#ccc',
+  },
+  radioSelected: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: ORANGE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: ORANGE,
+  },
+  serviceName: { fontSize: 15, fontWeight: '700', color: DARK },
+  serviceNameActive: { color: ORANGE },
+  serviceMeta: { fontSize: 11, color: GREY, marginLeft: 28, marginBottom: 4 },
+  serviceDiscountTag: {
+    backgroundColor: '#22C55E',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    alignSelf: 'flex-start',
+    marginLeft: 28,
+  },
+  serviceDiscountText: { fontSize: 10, fontWeight: '800', color: '#fff' },
+  servicePriceBlock: { alignItems: 'flex-end' },
+  servicePrice: { fontSize: 16, fontWeight: '800', color: DARK },
+  servicePriceStrike: { fontSize: 12, color: '#aaa', textDecorationLine: 'line-through' },
+  servicePriceDiscount: { fontSize: 16, fontWeight: '800', color: '#22C55E' },
 
-  // ── calendar ──
+  // ── 5. booking section ──
+  subHeading: { fontSize: 14, fontWeight: '700', color: DARK, marginBottom: 10, marginTop: 16 },
+
+  payModeOptions: { flexDirection: 'row', gap: 10 },
+  payModeOption: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: BORDER,
+    backgroundColor: '#FAFAFA',
+  },
+  payModeSelected: {
+    borderColor: ORANGE,
+    backgroundColor: ORANGE_BG,
+  },
+  payModeIcon: { fontSize: 20 },
+  payModeLabel: { fontSize: 12, fontWeight: '700', color: GREY },
+  payModeLabelSel: { color: ORANGE },
+
   calendarCard: {
     backgroundColor: '#fff',
     borderRadius: 14,
     paddingVertical: 14,
     paddingHorizontal: 10,
-    marginBottom: 20,
+    marginTop: 16,
     borderWidth: 1,
-    borderColor: '#f0f0f0',
+    borderColor: BORDER,
   },
   calendarHeader: {
     flexDirection: 'row',
@@ -763,105 +888,143 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     paddingHorizontal: 2,
   },
-  calMonthLabel: { fontSize: 14, fontWeight: '700', color: '#1a1a1a' },
-  calNavBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#f4f0ff', alignItems: 'center', justifyContent: 'center' },
-  calNavBtnDisabled: { backgroundColor: '#f0f0f0' },
-  calNavArrow: { fontSize: 20, color: PURPLE, lineHeight: 24, fontWeight: '700' },
-  calNavArrowDisabled: { color: '#ccc' },
+  calMonthLabel: { fontSize: 14, fontWeight: '700', color: DARK },
+  calNavBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: ORANGE_BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calNavBtnDisabled: { backgroundColor: LIGHT_BG },
+  calNavArrow: { fontSize: 20, color: ORANGE, lineHeight: 24, fontWeight: '700' },
   calDayRow: { flexDirection: 'row', justifyContent: 'space-around' },
   calDayName: { width: 34, textAlign: 'center', fontSize: 10, fontWeight: '600', color: '#999', marginBottom: 6 },
   calDayCell: { width: 34, alignItems: 'center', paddingVertical: 3 },
   calDayCircle: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  calDayCircleSel: { backgroundColor: PURPLE },
-  calDayCirclePast: { opacity: 0.35 },
-  calDayNum: { fontSize: 14, fontWeight: '700', color: '#1a1a1a' },
-  calDayNumSel: { color: '#fff' },
-  calDayNumPast: { color: '#bbb' },
+  calDayCircleSel: { backgroundColor: ORANGE },
+  calDayNum: { fontSize: 14, fontWeight: '700', color: DARK },
   calDayMon: { fontSize: 8, color: '#aaa', marginTop: 2, fontWeight: '500' },
-  calDayMonSel: { color: PURPLE, fontWeight: '700' },
+  calDayClosed: { fontSize: 7, color: '#E55', marginTop: 2, fontWeight: '700' },
 
-  // ── time slots ──
-  slotsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
-  slotPill: {
-    width: '30.5%',
-    paddingVertical: 10,
+  closedBanner: {
+    backgroundColor: '#FFF0F0',
     borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#FDDCDC',
+  },
+  closedBannerText: { fontSize: 13, fontWeight: '700', color: '#C53030' },
+
+  slotGroup: { marginBottom: 14 },
+  slotGroupLabel: { fontSize: 12, fontWeight: '700', color: GREY, marginBottom: 8, letterSpacing: 0.3 },
+  slotScrollContent: { gap: 8, paddingRight: 4 },
+  slotChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
     backgroundColor: '#fff',
     borderWidth: 1.5,
-    borderColor: '#e0e0e0',
-    alignItems: 'center',
+    borderColor: BORDER,
   },
-  slotPillSel: { borderColor: PURPLE, borderWidth: 2, backgroundColor: PURPLE_BG },
-  slotText: { fontSize: 12, fontWeight: '600', color: '#333' },
-  slotTextSel: { color: PURPLE, fontWeight: '700' },
+  slotChipSel: {
+    borderColor: ORANGE,
+    borderWidth: 2,
+    backgroundColor: ORANGE_BG,
+  },
+  slotChipText: { fontSize: 13, fontWeight: '600', color: '#444' },
+  slotChipTextSel: { color: ORANGE, fontWeight: '800' },
 
-  // ── notes ──
   notesInput: {
     backgroundColor: '#fff',
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: '#e8e8e8',
+    borderColor: BORDER,
     padding: 12,
     fontSize: 14,
-    color: '#1a1a1a',
+    color: DARK,
     minHeight: 80,
     textAlignVertical: 'top',
     marginBottom: 8,
   },
 
-  // ── CTA ──
-  ctaInline: { marginTop: 8 },
+  // ── 6. photos — horizontal sliding ──
+  photosSection: {
+    paddingTop: 20,
+    paddingBottom: 8,
+  },
+  photosListContent: {
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  photoCard: {
+    width: 200,
+    height: 150,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
+  },
+  photoCardImage: {
+    width: 200,
+    height: 150,
+  },
+
+  // ── 7. location ──
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingVertical: 8,
+  },
+  locationPin: { fontSize: 16, marginTop: 1 },
+  locationText: { fontSize: 13, color: GREY, flex: 1, lineHeight: 20 },
+
+  // ── 8. help card ──
+  helpCard: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    backgroundColor: '#FFF8F1',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#FFDAC8',
+  },
+  helpText: { fontSize: 13, fontWeight: '600', color: DARK },
+  helpLink: { fontSize: 13, fontWeight: '700', color: ORANGE, marginTop: 4 },
+
+  // ── sticky CTA bar ──
   ctaBar: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    padding: 16,
-    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
     backgroundColor: '#fff',
     borderTopWidth: 1,
-    borderTopColor: '#eee',
+    borderTopColor: BORDER,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 14,
   },
-  ctaBarWide: {
-    padding: 16,
-    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  ctaBarFull: {
-    padding: 16,
-    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  galleryArrow: {
-    position: 'absolute',
-    top: '50%',
-    marginTop: -26,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: '#fff',
-    borderWidth: 2,
-    borderColor: PURPLE,
+  ctaSummary: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 6,
+    marginBottom: 8,
   },
-  galleryArrowLeft:  { left: 12 },
-  galleryArrowRight: { right: 12 },
-  galleryArrowText: { color: PURPLE, fontSize: 30, fontWeight: '900', lineHeight: 34, marginTop: -2 },
-  loginPrompt: { fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 10 },
-  bookBtn: { backgroundColor: PURPLE, borderRadius: 14, paddingVertical: 15, alignItems: 'center', alignSelf: 'stretch' },
-  bookBtnDisabled: { backgroundColor: '#d0d0d0' },
-  bookBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  ctaServiceName: { fontSize: 12, fontWeight: '600', color: GREY, flex: 1 },
+  ctaPrice: { fontSize: 14, fontWeight: '800', color: DARK },
+  ctaBtn: {
+    backgroundColor: ORANGE,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  ctaBtnDisabled: { backgroundColor: '#D0D0D0' },
+  ctaBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
 
   // ── success ──
   successCard: {
@@ -877,12 +1040,24 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 4,
   },
-  successIcon: { fontSize: 48, color: PURPLE, marginBottom: 12 },
-  successTitle: { fontSize: 22, fontWeight: '800', color: '#1a1a1a', marginBottom: 8 },
+  successIcon: { fontSize: 48, color: '#22C55E', marginBottom: 12 },
+  successTitle: { fontSize: 22, fontWeight: '800', color: DARK, marginBottom: 8 },
   successSub: { fontSize: 16, fontWeight: '700', color: '#333', marginBottom: 4 },
   successDetail: { fontSize: 14, color: '#555', marginBottom: 4, textAlign: 'center' },
   successNote: { fontSize: 12, color: '#aaa', textAlign: 'center', marginTop: 12, marginBottom: 20 },
-  doneBtn: { backgroundColor: PURPLE, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 40 },
+  doneBtn: { backgroundColor: ORANGE, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 40 },
   doneBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
-})
 
+  otpCard: {
+    backgroundColor: ORANGE_BG,
+    borderRadius: 14,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#FFDAC8',
+  },
+  otpLabel: { fontSize: 11, fontWeight: '700', color: ORANGE, letterSpacing: 0.8, textTransform: 'uppercase' },
+  otpCode:  { fontSize: 32, fontWeight: '900', color: DARK, letterSpacing: 8, marginVertical: 8 },
+  otpHint:  { fontSize: 11, color: GREY, textAlign: 'center' },
+})

@@ -15,8 +15,11 @@ function userFromFirebase(fbUser: FirebaseUser): User {
   return {
     id:           fbUser.uid,
     email:        fbUser.email ?? '',
+    phone:        null,
     display_name: fbUser.displayName ?? null,
+    avatar_url:   null,
     bio:          null,
+    address:      null,
     locale:       'en-US',
     timezone:     null,
     status:       'active',

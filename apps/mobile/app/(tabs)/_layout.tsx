@@ -39,31 +39,34 @@ export default function TabLayout() {
       <Tabs.Screen
         name="search"
         options={{
-          title:       'Search',
-          tabBarLabel: 'Search',
-          tabBarIcon:  ({ color }) => <TabIcon name="search-outline" color={color} />,
+          title:          'Search',
+          tabBarLabel:    'Search',
+          tabBarIcon:     ({ color }) => <TabIcon name="search-outline" color={color} />,
+          tabBarButton:   () => null,
         }}
       />
       <Tabs.Screen
         name="bookings"
         options={{
-          title:       'My Bookings',
-          tabBarLabel: 'Bookings',
-          tabBarIcon:  ({ color }) => <TabIcon name="calendar-outline" color={color} />,
+          headerShown:  false,
+          tabBarLabel:  'Bookings',
+          tabBarIcon:   ({ color }) => <TabIcon name="calendar-outline" color={color} />,
         }}
       />
       <Tabs.Screen
         name="payments"
         options={{
-          title:       'Payments',
-          tabBarLabel: 'Pay',
-          tabBarIcon:  ({ color }) => <TabIcon name="card-outline" color={color} />,
+          headerShown:  false,
+          tabBarLabel:  'Pay',
+          tabBarIcon:   ({ color }) => <TabIcon name="card-outline" color={color} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
-          title:       'Profile',
+          headerShown:  false,
+          header:       () => null,
+          tabBarStyle:  { display: 'none' },
           tabBarLabel: 'Profile',
           tabBarIcon:  ({ color }) => <TabIcon name="person-outline" color={color} />,
         }}

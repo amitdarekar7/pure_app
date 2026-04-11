@@ -16,6 +16,15 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
+// Expo web can request a relative entry module path in monorepos.
+// Remap it to the package entry so hoisted node_modules resolve correctly.
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (moduleName === './node_modules/expo-router/entry') {
+    return context.resolveRequest(context, 'expo-router/entry', platform);
+  }
+  return context.resolveRequest(context, moduleName, platform);
+};
+
 config.resolver.disableHierarchicalLookup = false;
 
 module.exports = config;

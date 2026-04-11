@@ -1,8 +1,10 @@
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Image,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -14,45 +16,124 @@ import {
 } from 'react-native'
 import { useEffect, useState, useCallback } from 'react'
 import * as ImagePicker from 'expo-image-picker'
-import { Ionicons } from '@expo/vector-icons'
+import { useRouter } from 'expo-router'
 import { useProviderAuth } from '../../lib/provider-auth-context'
 import { ProviderPortalAPI, type ProviderService, type ServiceImage } from '../../lib/api'
+
 const LOGO = require('../../assets/images/logo_pure.png')
+
+// ─── Theme ────────────────────────────────────────────────────────────────────
+const ACCENT    = '#E8590C'
+const ACCENT_BG = '#FFF4ED'
+const DARK      = '#1B1B1B'
+const GREY      = '#6B7280'
+const BORDER    = '#F3F4F6'
+const GREEN     = '#059669'
+const GREEN_BG  = '#ECFDF5'
+
 // ── Category options ────────────────────────────────────────────────────────
 const CATEGORIES = [
-  { slug: 'haircut',       label: 'Hair Cut' },
-  { slug: 'facial',        label: 'Facial' },
-  { slug: 'manicure',      label: 'Manicure' },
-  { slug: 'pedicure',      label: 'Pedicure' },
-  { slug: 'haircolor',     label: 'Hair Color' },
-  { slug: 'threading',     label: 'Threading' },
-  { slug: 'hairstyling',   label: 'Hair Styling' },
-  { slug: 'waxing',        label: 'Waxing' },
-  { slug: 'bridalmakeup',  label: 'Bridal Makeup' },
-  { slug: 'partymakeup',   label: 'Party Makeup' },
-  { slug: 'straightening', label: 'Straightening' },
-  { slug: 'nailext',       label: 'Nail Extensions' },
+  { slug: 'haircut',       label: 'Hair Cut',        icon: '💇' },
+  { slug: 'facial',        label: 'Facial',          icon: '🧖' },
+  { slug: 'manicure',      label: 'Manicure',        icon: '💅' },
+  { slug: 'pedicure',      label: 'Pedicure',        icon: '🦶' },
+  { slug: 'haircolor',     label: 'Hair Color',      icon: '🎨' },
+  { slug: 'threading',     label: 'Threading',       icon: '🧵' },
+  { slug: 'hairstyling',   label: 'Hair Styling',    icon: '💆' },
+  { slug: 'waxing',        label: 'Waxing',          icon: '✨' },
+  { slug: 'bridalmakeup',  label: 'Bridal Makeup',   icon: '👰' },
+  { slug: 'partymakeup',   label: 'Party Makeup',    icon: '🎉' },
+  { slug: 'straightening', label: 'Straightening',   icon: '🪮' },
+  { slug: 'nailext',       label: 'Nail Extensions', icon: '💎' },
 ]
 
-const IMAGE_SLOTS = 3 // placeholder slots shown per service
+const IMAGE_SLOTS = 3
+const DISCOUNT_OPTIONS = [0, 5, 10, 15, 20, 30, 50]
+
+// ─── Separate DiscountChips: web uses <button>, native uses Pressable ────────
+function DiscountChips({ currentPct, isSaving, onSelect }: {
+  currentPct: number; isSaving: boolean; onSelect: (pct: number) => void
+}) {
+  if (Platform.OS === 'web') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+        {DISCOUNT_OPTIONS.map(pct => {
+          const active = currentPct === pct
+          return (
+            <button
+              key={pct}
+              type="button"
+              disabled={active || isSaving}
+              onClick={() => onSelect(pct)}
+              style={{
+                paddingLeft: 14, paddingRight: 14, paddingTop: 8, paddingBottom: 8,
+                borderRadius: 20, minWidth: 48, cursor: active ? 'default' : 'pointer',
+                border: `2px solid ${active ? GREEN : '#E5E7EB'}`,
+                backgroundColor: active ? GREEN : '#fff',
+                color: active ? '#fff' : GREY,
+                fontSize: 13, fontWeight: active ? 800 : 600,
+                fontFamily: 'inherit', transition: 'all 0.15s ease',
+              }}
+            >
+              {pct === 0 ? 'None' : `${pct}%`}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
+
+  return (
+    <View style={dcStyles.row}>
+      {DISCOUNT_OPTIONS.map(pct => {
+        const active = currentPct === pct
+        return (
+          <Pressable
+            key={pct}
+            style={[dcStyles.chip, active && dcStyles.chipActive]}
+            onPress={() => { if (!active && !isSaving) onSelect(pct) }}
+          >
+            <Text style={[dcStyles.text, active && dcStyles.textActive]}>
+              {pct === 0 ? 'None' : `${pct}%`}
+            </Text>
+          </Pressable>
+        )
+      })}
+    </View>
+  )
+}
+
+const dcStyles = StyleSheet.create({
+  row:        { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  chip:       { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: '#fff', borderWidth: 2, borderColor: '#E5E7EB', minWidth: 48, alignItems: 'center' },
+  chipActive: { backgroundColor: GREEN, borderColor: GREEN },
+  text:       { color: GREY, fontSize: 13, fontWeight: '600' },
+  textActive: { color: '#fff', fontWeight: '800' },
+})
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ProviderServicesScreen() {
   const { providerUser, providerProfile } = useProviderAuth()
+  const router = useRouter()
   const [services,   setServices]   = useState<ProviderService[]>([])
   const [images,     setImages]     = useState<Record<string, ServiceImage[]>>({})
   const [loading,    setLoading]    = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [uploading,  setUploading]  = useState<string | null>(null)   // serviceId being uploaded
-  const [toggling,   setToggling]   = useState<string | null>(null)   // serviceId being toggled
+  const [uploading,  setUploading]  = useState<string | null>(null)
+  const [toggling,   setToggling]   = useState<string | null>(null)
+  const [savingDiscount, setSavingDiscount] = useState<string | null>(null)
 
   // ── Add service modal state ─────────────────────────────────────────────
   const [showAdd,      setShowAdd]      = useState(false)
   const [addCategory,  setAddCategory]  = useState(CATEGORIES[0].slug)
-  const [addTitle,     setAddTitle]     = useState('')
   const [addPrice,     setAddPrice]     = useState('')
   const [addDuration,  setAddDuration]  = useState('')
   const [addLoading,   setAddLoading]   = useState(false)
   const [addError,     setAddError]     = useState<string | null>(null)
+
+  // ── Expanded cards (collapsible) ────────────────────────────────────────
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -88,6 +169,26 @@ export default function ProviderServicesScreen() {
     }
   }
 
+  // ── Set discount on a service ─────────────────────────────────────────
+  async function updateDiscount(serviceId: string, pct: number) {
+    const prev = services.find(s => s.id === serviceId)?.discount_pct
+    setSavingDiscount(serviceId)
+    setServices(cur =>
+      cur.map(s => s.id === serviceId ? { ...s, discount_pct: pct } : s),
+    )
+    try {
+      await ProviderPortalAPI.setDiscount(serviceId, pct)
+    } catch {
+      setServices(cur =>
+        cur.map(s => s.id === serviceId ? { ...s, discount_pct: prev ?? 0 } : s),
+      )
+      if (Platform.OS === 'web') window.alert('Could not update discount.')
+      else Alert.alert('Error', 'Could not update discount.')
+    } finally {
+      setSavingDiscount(null)
+    }
+  }
+
   // ── Image pick & upload ─────────────────────────────────────────────────
   async function pickAndUpload(serviceId: string) {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
@@ -106,8 +207,6 @@ export default function ProviderServicesScreen() {
     if (!asset?.uri) return
 
     setUploading(serviceId)
-
-    // Show the image immediately from the local URI (optimistic update)
     const sortOrder = images[serviceId]?.length ?? 0
     const tempId = `temp-${Date.now()}`
     const tempImage: ServiceImage = {
@@ -127,7 +226,6 @@ export default function ProviderServicesScreen() {
         asset.uri,
         sortOrder,
       )
-      // Replace the temporary entry with the persisted server record
       setImages(prev => ({
         ...prev,
         [serviceId]: (prev[serviceId] ?? []).map(img =>
@@ -135,7 +233,7 @@ export default function ProviderServicesScreen() {
         ),
       }))
     } catch {
-      // Upload failed — keep showing the local image for this session
+      // Keep showing local image
     } finally {
       setUploading(null)
     }
@@ -162,8 +260,7 @@ export default function ProviderServicesScreen() {
   // ── Create service ──────────────────────────────────────────────────────
   async function handleAddService() {
     setAddError(null)
-    const title = addTitle.trim()
-    if (!title) { setAddError('Service name is required.'); return }
+    const title = CATEGORIES.find(c => c.slug === addCategory)?.label ?? addCategory
     const price = parseInt(addPrice, 10)
     if (isNaN(price) || price < 0) { setAddError('Enter a valid price in ₹.'); return }
     const duration = parseInt(addDuration, 10)
@@ -180,7 +277,7 @@ export default function ProviderServicesScreen() {
       setServices(prev => [...prev, service])
       setImages(prev => ({ ...prev, [service.id]: [] }))
       setShowAdd(false)
-      setAddTitle(''); setAddPrice(''); setAddDuration('')
+      setAddPrice(''); setAddDuration('')
       setAddCategory(CATEGORIES[0].slug)
     } catch (err: unknown) {
       setAddError(err instanceof Error ? err.message : 'Failed to add service.')
@@ -189,390 +286,779 @@ export default function ProviderServicesScreen() {
     }
   }
 
+  const firstName = providerProfile?.name
+    ? providerProfile.name.split(' ')[0]
+    : (providerUser?.email ?? '').split('@')[0]
+
+  const activeCount = services.filter(s => s.is_available).length
+  const totalRevenue = services.reduce((sum, s) => sum + s.price_paise, 0)
+
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#7c6af7" />
+      <View style={styles.centerFlex}>
+        <ActivityIndicator size="large" color={ACCENT} />
       </View>
     )
   }
 
   return (
     <View style={styles.root}>
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => { setRefreshing(true); load() }}
-            tintColor="#7c6af7"
-          />
-        }
-      >
-        <View style={styles.inner}>
-        {/* Logo + user header */}
-        <View style={styles.pageHeader}>
-          <Image source={LOGO} style={styles.logoImg} resizeMode="contain" />
-          <View style={styles.avatarRow}>
-            <View style={styles.avatarCircle}>
-              <Text style={styles.avatarLetter}>
-                {(providerProfile?.name ?? providerUser?.email ?? 'P')[0].toUpperCase()}
-              </Text>
+      <View style={styles.centerWrap}>
+
+        {/* ═══════════════════════════════════════════════════════════════════
+            HEADER
+         ═══════════════════════════════════════════════════════════════════ */}
+        <View style={styles.headerCard}>
+          <View style={styles.headerTop}>
+            <Pressable onPress={() => router.push('/(provider)/dashboard')}>
+              <Image source={LOGO} style={styles.logoImg} resizeMode="contain" />
+            </Pressable>
+            <Pressable style={styles.avatarPill} onPress={() => router.push('/(provider)/profile')}>
+              {providerProfile?.profile_image_url ? (
+                <Image source={{ uri: providerProfile.profile_image_url }} style={styles.avatarImg} />
+              ) : (
+                <View style={styles.avatarCircle}>
+                  <Text style={styles.avatarLetter}>
+                    {(providerProfile?.name ?? providerUser?.email ?? 'P')[0].toUpperCase()}
+                  </Text>
+                </View>
+              )}
+              <Text style={styles.avatarName} numberOfLines={1}>{providerProfile?.name ?? firstName}</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.headerTitleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.headerTitle}>Services</Text>
+              <Text style={styles.headerHint}>Manage your services, pricing &amp; photos</Text>
             </View>
-            <View>
-              <Text style={styles.avatarName} numberOfLines={1}>
-                {providerProfile?.name
-                  ? providerProfile.name.split(' ')[0]
-                  : (providerUser?.email ?? '').split('@')[0]}
-              </Text>
-              <Text style={styles.avatarSub}>{providerUser?.email ?? 'Provider'}</Text>
+            <Pressable style={styles.addBtn} onPress={() => setShowAdd(true)}>
+              <Text style={styles.addBtnIcon}>+</Text>
+              <Text style={styles.addBtnText}>Add Service</Text>
+            </Pressable>
+          </View>
+
+          {/* Quick stats */}
+          <View style={styles.statsRow}>
+            <View style={styles.statChip}>
+              <Text style={styles.statEmoji}>📋</Text>
+              <Text style={styles.statValue}>{services.length}</Text>
+              <Text style={styles.statLabel}>Total</Text>
+            </View>
+            <View style={styles.statChip}>
+              <Text style={styles.statEmoji}>✅</Text>
+              <Text style={styles.statValue}>{activeCount}</Text>
+              <Text style={styles.statLabel}>Active</Text>
+            </View>
+            <View style={styles.statChip}>
+              <Text style={styles.statEmoji}>⏸️</Text>
+              <Text style={styles.statValue}>{services.length - activeCount}</Text>
+              <Text style={styles.statLabel}>Hidden</Text>
             </View>
           </View>
         </View>
-        {/* Header row */}
-        <View style={styles.headerRow}>
-          <Text style={styles.hint}>Manage your services &amp; photos</Text>
-          <Pressable style={styles.addServiceBtn} onPress={() => setShowAdd(true)}>
-            <Ionicons name="add" size={16} color="#fff" />
-            <Text style={styles.addServiceBtnText}>Add Service</Text>
-          </Pressable>
-        </View>
 
-        {services.length === 0 && (
-          <View style={styles.emptyState}>
-            <Ionicons name="cut-outline" size={48} color="#ccc" />
-            <Text style={styles.emptyTitle}>No services yet</Text>
-            <Text style={styles.emptySub}>Tap &ldquo;Add Service&rdquo; to create your first service</Text>
-          </View>
-        )}
+        {/* ═══════════════════════════════════════════════════════════════════
+            SERVICE LIST
+         ═══════════════════════════════════════════════════════════════════ */}
+        <ScrollView
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => { setRefreshing(true); load() }}
+              tintColor={ACCENT}
+            />
+          }
+        >
+          {services.length === 0 && (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyEmoji}>✂️</Text>
+              <Text style={styles.emptyTitle}>No services yet</Text>
+              <Text style={styles.emptySub}>Tap "Add Service" to create your first service and start accepting bookings.</Text>
+              <Pressable style={styles.emptyBtn} onPress={() => setShowAdd(true)}>
+                <Text style={styles.emptyBtnText}>+ Add Your First Service</Text>
+              </Pressable>
+            </View>
+          )}
 
-        {services.map(svc => {
-          const svcImages  = images[svc.id] ?? []
-          const isToggling = toggling === svc.id
-          const isUploading = uploading === svc.id
-          // Build slots: filled images + empty placeholder slots
-          const slots = [
-            ...svcImages,
-            ...Array(Math.max(0, IMAGE_SLOTS - svcImages.length)).fill(null),
-          ]
+          {services.map(svc => {
+            const svcImages   = images[svc.id] ?? []
+            const isToggling  = toggling === svc.id
+            const isUploading = uploading === svc.id
+            const isExpanded  = expandedId === svc.id
+            const cat = CATEGORIES.find(c => c.slug === svc.category_slug)
+            const discountPct = Number(svc.discount_pct)
+            const discountedPrice = Math.round(svc.price_paise * (1 - discountPct / 100) / 100)
+            const originalPrice = Math.round(svc.price_paise / 100)
 
-          return (
-            <View key={svc.id} style={[styles.card, !svc.is_available && styles.cardDisabled]}>
+            const slots = [
+              ...svcImages,
+              ...Array(Math.max(0, IMAGE_SLOTS - svcImages.length)).fill(null),
+            ]
 
-              {/* ── Service header ── */}
-              <View style={styles.cardHeader}>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.titleRow}>
-                    <Text style={styles.serviceTitle} numberOfLines={1}>{svc.title}</Text>
-                    <View style={styles.categoryBadge}>
-                      <Text style={styles.categoryBadgeText}>
-                        {CATEGORIES.find(c => c.slug === svc.category_slug)?.label ?? svc.category_slug}
-                      </Text>
+            return (
+              <Pressable
+                key={svc.id}
+                style={[styles.card, !svc.is_available && styles.cardDisabled]}
+                onPress={() => setExpandedId(isExpanded ? null : svc.id)}
+              >
+                {/* Accent strip */}
+                <View style={[styles.cardStrip, { backgroundColor: svc.is_available ? ACCENT : '#D1D5DB' }]} />
+
+                <View style={styles.cardBody}>
+                  {/* ── Card header: name, category, price, toggle ── */}
+                  <View style={styles.cardTop}>
+                    <View style={{ flex: 1 }}>
+                      <View style={styles.cardTitleRow}>
+                        <Text style={styles.cardEmoji}>{cat?.icon ?? '✂️'}</Text>
+                        <Text style={styles.cardTitle} numberOfLines={1}>{cat?.label ?? svc.title}</Text>
+                      </View>
+                      <View style={styles.metaRow}>
+                        <View style={styles.durationChip}>
+                          <Text style={styles.durationChipText}>🕐 {svc.duration_mins} min</Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    <View style={styles.cardRight}>
+                      {/* Price block */}
+                      <View style={styles.priceBlock}>
+                        {discountPct > 0 ? (
+                          <>
+                            <Text style={styles.priceOriginal}>₹{originalPrice}</Text>
+                            <Text style={styles.priceFinal}>₹{discountedPrice}</Text>
+                          </>
+                        ) : (
+                          <Text style={styles.priceFinal}>₹{originalPrice}</Text>
+                        )}
+                      </View>
+
+                      {/* Toggle */}
+                      <View style={styles.toggleBlock}>
+                        <Text style={[styles.toggleLabel, svc.is_available ? styles.toggleOn : styles.toggleOff]}>
+                          {svc.is_available ? 'Active' : 'Hidden'}
+                        </Text>
+                        {isToggling ? (
+                          <ActivityIndicator size="small" color={ACCENT} />
+                        ) : (
+                          <Switch
+                            value={svc.is_available}
+                            onValueChange={() => toggleService(svc)}
+                            trackColor={{ false: '#E5E7EB', true: ACCENT }}
+                            thumbColor={svc.is_available ? '#fff' : '#D1D5DB'}
+                          />
+                        )}
+                      </View>
                     </View>
                   </View>
-                  <Text style={styles.serviceMeta}>
-                    ₹{(svc.price_paise / 100).toFixed(0)} · {svc.duration_mins} min
-                  </Text>
-                </View>
 
-                {/* Enable / Disable toggle */}
-                <View style={styles.toggleBlock}>
-                  <Text style={[styles.toggleLabel, svc.is_available ? styles.labelOn : styles.labelOff]}>
-                    {svc.is_available ? 'Active' : 'Hidden'}
-                  </Text>
-                  {isToggling
-                    ? <ActivityIndicator size="small" color="#7c6af7" style={{ marginLeft: 6 }} />
-                    : (
-                      <Switch
-                        value={svc.is_available}
-                        onValueChange={() => toggleService(svc)}
-                        trackColor={{ false: '#e5e7eb', true: '#7c6af7' }}
-                        thumbColor={svc.is_available ? '#fff' : '#aaa'}
-                      />
-                    )
-                  }
-                </View>
-              </View>
+                  {/* Expand hint */}
+                  <View style={styles.expandHintRow}>
+                    <Text style={styles.expandHint}>
+                      {isExpanded ? '▲ Tap to collapse' : '▼ Tap to expand — discount & photos'}
+                    </Text>
+                    {discountPct > 0 && !isExpanded && (
+                      <View style={styles.discountMiniTag}>
+                        <Text style={styles.discountMiniText}>{discountPct}% OFF</Text>
+                      </View>
+                    )}
+                    {svcImages.length > 0 && !isExpanded && (
+                      <View style={styles.photoCountTag}>
+                        <Text style={styles.photoCountText}>📷 {svcImages.length}</Text>
+                      </View>
+                    )}
+                  </View>
 
-              {/* ── Image slots ── */}
-              <View style={styles.slotsRow}>
-                {slots.map((img, idx) =>
-                  img ? (
-                    /* Filled slot */
-                    <View key={(img as ServiceImage).id} style={styles.slot}>
-                      <Image
-                        source={{ uri: (img as ServiceImage).image_url }}
-                        style={styles.slotImage}
-                        resizeMode="cover"
-                      />
-                      <Pressable
-                        style={styles.deleteOverlay}
-                        onPress={() => deleteImage(svc.id, (img as ServiceImage).id)}
-                        hitSlop={8}
-                      >
-                        <Ionicons name="close-circle" size={20} color="#fff" />
-                      </Pressable>
+                  {/* ── Expanded section ── */}
+                  {isExpanded && (
+                    <View style={styles.expandedSection}>
+                      {/* ── Discount control ── */}
+                      <View style={styles.discountCard}>
+                        <View style={styles.discountHeader}>
+                          <View style={styles.discountLabelRow}>
+                            <Text style={styles.discountIcon}>🏷️</Text>
+                            <Text style={styles.discountLabel}>Discount</Text>
+                          </View>
+                          {discountPct > 0 ? (
+                            <View style={styles.discountBadge}>
+                              <Text style={styles.discountBadgeText}>
+                                {discountPct}% OFF · ₹{discountedPrice}
+                              </Text>
+                            </View>
+                          ) : (
+                            <Text style={styles.noDiscountText}>No discount</Text>
+                          )}
+                        </View>
+                        <DiscountChips
+                          currentPct={discountPct}
+                          isSaving={savingDiscount === svc.id}
+                          onSelect={(pct) => updateDiscount(svc.id, pct)}
+                        />
+                      </View>
+
+                      {/* ── Image gallery ── */}
+                      <Text style={styles.photosSectionLabel}>📷 Photos</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photosScroll}>
+                        {slots.map((img, idx) =>
+                          img ? (
+                            <View key={(img as ServiceImage).id} style={styles.photoCard}>
+                              <Image
+                                source={{ uri: (img as ServiceImage).image_url }}
+                                style={styles.photoImage}
+                                resizeMode="cover"
+                              />
+                              <Pressable
+                                style={styles.photoDeleteBtn}
+                                onPress={() => deleteImage(svc.id, (img as ServiceImage).id)}
+                                hitSlop={8}
+                              >
+                                <Text style={styles.photoDeleteText}>✕</Text>
+                              </Pressable>
+                            </View>
+                          ) : (
+                            <Pressable
+                              key={`placeholder-${idx}`}
+                              style={styles.photoPlaceholder}
+                              onPress={() => pickAndUpload(svc.id)}
+                              disabled={isUploading}
+                            >
+                              {isUploading && idx === svcImages.length ? (
+                                <ActivityIndicator size="small" color={ACCENT} />
+                              ) : (
+                                <>
+                                  <Text style={styles.photoPlaceholderIcon}>📷</Text>
+                                  <Text style={styles.photoPlaceholderText}>Add Photo</Text>
+                                </>
+                              )}
+                            </Pressable>
+                          ),
+                        )}
+                        {/* Additional upload if all slots filled */}
+                        {svcImages.length >= IMAGE_SLOTS && (
+                          <Pressable
+                            style={styles.photoAddMore}
+                            onPress={() => pickAndUpload(svc.id)}
+                            disabled={isUploading}
+                          >
+                            {isUploading
+                              ? <ActivityIndicator size="small" color={ACCENT} />
+                              : <>
+                                  <Text style={styles.photoAddMoreIcon}>+</Text>
+                                  <Text style={styles.photoAddMoreText}>Add More</Text>
+                                </>
+                            }
+                          </Pressable>
+                        )}
+                      </ScrollView>
                     </View>
-                  ) : (
-                    /* Empty placeholder slot */
-                    <Pressable
-                      key={`placeholder-${idx}`}
-                      style={styles.slotPlaceholder}
-                      onPress={() => pickAndUpload(svc.id)}
-                      disabled={isUploading}
-                    >
-                      {isUploading && idx === svcImages.length ? (
-                        <ActivityIndicator size="small" color="#7c6af7" />
-                      ) : (
-                        <>
-                          <Ionicons name="camera-outline" size={22} color="#bbb" />
-                          <Text style={styles.slotPlaceholderText}>Add Photo</Text>
-                        </>
-                      )}
-                    </Pressable>
-                  ),
-                )}
+                  )}
+                </View>
+              </Pressable>
+            )
+          })}
+          <View style={{ height: 40 }} />
+        </ScrollView>
+      </View>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          ADD SERVICE MODAL
+       ═══════════════════════════════════════════════════════════════════ */}
+      <Modal visible={showAdd} animationType="fade" transparent>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowAdd(false)}>
+          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>✨ Add New Service</Text>
+            <Text style={styles.modalSub}>Create a new service for your customers</Text>
+
+            {addError ? (
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorText}>⚠️ {addError}</Text>
               </View>
+            ) : null}
 
-              {/* Add more photos if all 3 slots are filled */}
-              {svcImages.length >= IMAGE_SLOTS && (
-                <Pressable
-                  style={[styles.addMoreBtn, isUploading && styles.btnDisabled]}
-                  onPress={() => pickAndUpload(svc.id)}
-                  disabled={isUploading}
-                >
-                  {isUploading
-                    ? <ActivityIndicator size="small" color="#7c6af7" />
-                    : <><Ionicons name="add-circle-outline" size={16} color="#7c6af7" />
-                        <Text style={styles.addMoreText}>Add more photos ({svcImages.length})</Text>
-                      </>
-                  }
-                </Pressable>
-              )}
+            <ScrollView showsVerticalScrollIndicator={false} style={styles.modalScroll}>
+              {/* Category */}
+              <Text style={styles.fieldLabel}>Category</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {CATEGORIES.map(cat => {
+                    const active = addCategory === cat.slug
+                    return (
+                      <Pressable
+                        key={cat.slug}
+                        style={[styles.catChip, active && styles.catChipActive]}
+                        onPress={() => setAddCategory(cat.slug)}
+                      >
+                        <Text style={styles.catChipEmoji}>{cat.icon}</Text>
+                        <Text style={[styles.catChipText, active && styles.catChipTextActive]}>
+                          {cat.label}
+                        </Text>
+                      </Pressable>
+                    )
+                  })}
+                </View>
+              </ScrollView>
+
+              {/* Price + Duration */}
+              <View style={styles.twoCol}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>Price (₹) *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="500"
+                    placeholderTextColor="#9CA3AF"
+                    value={addPrice}
+                    onChangeText={setAddPrice}
+                    keyboardType="number-pad"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>Duration (min) *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="45"
+                    placeholderTextColor="#9CA3AF"
+                    value={addDuration}
+                    onChangeText={setAddDuration}
+                    keyboardType="number-pad"
+                  />
+                </View>
+              </View>
+            </ScrollView>
+
+            {/* Footer buttons */}
+            <View style={styles.modalFooter}>
+              <Pressable style={styles.modalCancelBtn} onPress={() => setShowAdd(false)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalSaveBtn, addLoading && { opacity: 0.6 }]}
+                onPress={handleAddService}
+                disabled={addLoading}
+              >
+                {addLoading
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.modalSaveText}>Save Service</Text>
+                }
+              </Pressable>
             </View>
-          )
-        })}
-        </View>
-      </ScrollView>
-
-      {/* ── Add Service Modal ── */}
-      <Modal visible={showAdd} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setShowAdd(false)} />
-          <View style={styles.modalSheet}>
-          <View style={styles.modalHandle} />
-          <Text style={styles.modalTitle}>Add New Service</Text>
-
-          {addError ? <Text style={styles.addError}>{addError}</Text> : null}
-
-          <Text style={styles.fieldLabel}>Category</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              {CATEGORIES.map(cat => (
-                <Pressable
-                  key={cat.slug}
-                  style={[styles.catChip, addCategory === cat.slug && styles.catChipActive]}
-                  onPress={() => setAddCategory(cat.slug)}
-                >
-                  <Text style={[styles.catChipText, addCategory === cat.slug && styles.catChipTextActive]}>
-                    {cat.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          </ScrollView>
-
-          <Text style={styles.fieldLabel}>Service Name *</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g. Women's Haircut & Blowdry"
-            placeholderTextColor="#555"
-            value={addTitle}
-            onChangeText={setAddTitle}
-          />
-
-          <View style={styles.row2}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.fieldLabel}>Price (₹) *</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. 500"
-                placeholderTextColor="#555"
-                value={addPrice}
-                onChangeText={setAddPrice}
-                keyboardType="number-pad"
-              />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.fieldLabel}>Duration (min) *</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. 45"
-                placeholderTextColor="#555"
-                value={addDuration}
-                onChangeText={setAddDuration}
-                keyboardType="number-pad"
-              />
-            </View>
-          </View>
-
-          <Pressable
-            style={[styles.saveBtn, addLoading && styles.btnDisabled]}
-            onPress={handleAddService}
-            disabled={addLoading}
-          >
-            {addLoading
-              ? <ActivityIndicator color="#fff" />
-              : <Text style={styles.saveBtnText}>Save Service</Text>
-            }
           </Pressable>
-          </View>
-        </View>
+        </Pressable>
       </Modal>
     </View>
   )
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  root:    { flex: 1, backgroundColor: '#f8f8f8' },
-  content: { alignItems: 'center', padding: 16, paddingBottom: 80 },
-  inner:      { width: '100%', maxWidth: 520 },
-  pageHeader: {
-    flexDirection:  'row',
-    justifyContent: 'space-between',
-    alignItems:     'center',
-    paddingVertical: 14,
-    marginBottom:   8,
+  root: { flex: 1, backgroundColor: '#F9FAFB' },
+  centerWrap: { flex: 1, width: '100%', maxWidth: 560, alignSelf: 'center' },
+  centerFlex: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F9FAFB' },
+
+  // ── Header ──
+  headerCard: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f5',
+    borderBottomColor: BORDER,
   },
-  logoImg:  { width: 100, height: 36 },
-  avatarRow: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    gap:             8,
-    backgroundColor: '#f8f8fc',
-    borderRadius:    22,
-    paddingVertical:  6,
-    paddingLeft:      6,
-    paddingRight:    12,
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  logoImg: { width: 80, height: 30 },
+  avatarPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 24,
+    paddingVertical: 5,
+    paddingLeft: 5,
+    paddingRight: 14,
+    borderWidth: 1,
+    borderColor: BORDER,
   },
   avatarCircle: {
-    width:           36,
-    height:          36,
-    borderRadius:    18,
-    backgroundColor: '#0f0f23',
-    alignItems:      'center',
-    justifyContent:  'center',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  avatarLetter: { color: '#7c6af7', fontWeight: '900', fontSize: 15 },
-  avatarName:   { color: '#0f0f23', fontWeight: '800', fontSize: 13, maxWidth: 90 },
-  avatarSub:    { color: '#aaa', fontSize: 10, marginTop: 1 },
-  center:  { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f8f8' },
+  avatarLetter: { color: '#fff', fontWeight: '900', fontSize: 14 },
+  avatarImg: { width: 32, height: 32, borderRadius: 16 },
+  avatarName: { color: DARK, fontWeight: '800', fontSize: 12, maxWidth: 100 },
 
-  headerRow:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  hint:              { color: '#888', fontSize: 13 },
-  addServiceBtn:     { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#7c6af7', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
-  addServiceBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  headerTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 14,
+  },
+  headerTitle: { fontSize: 24, fontWeight: '900', color: DARK, letterSpacing: -0.5 },
+  headerHint: { fontSize: 13, color: GREY, marginTop: 2 },
 
-  emptyState: { alignItems: 'center', marginTop: 60, gap: 10 },
-  emptyTitle: { color: '#0f0f23', fontSize: 18, fontWeight: '700' },
-  emptySub:   { color: '#aaa',    fontSize: 13, textAlign: 'center' },
+  addBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: ACCENT,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    shadowColor: ACCENT,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  addBtnIcon: { color: '#fff', fontSize: 18, fontWeight: '600', marginTop: -1 },
+  addBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
 
-  // Service card
+  // ── Stats ──
+  statsRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  statChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  statEmoji: { fontSize: 16 },
+  statValue: { fontSize: 16, fontWeight: '900', color: DARK },
+  statLabel: { fontSize: 11, color: GREY, fontWeight: '600' },
+
+  // ── List ──
+  list: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40 },
+
+  emptyCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 32,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: BORDER,
+    marginTop: 20,
+  },
+  emptyEmoji: { fontSize: 40, marginBottom: 12 },
+  emptyTitle: { fontSize: 18, fontWeight: '800', color: DARK, marginBottom: 4 },
+  emptySub: { fontSize: 13, color: GREY, textAlign: 'center', lineHeight: 19, marginBottom: 16 },
+  emptyBtn: {
+    backgroundColor: ACCENT,
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  emptyBtnText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+
+  // ── Service card ──
   card: {
     backgroundColor: '#fff',
-    borderRadius:    14,
-    padding:         14,
-    marginBottom:    16,
-    borderWidth:     1,
-    borderColor:     '#ebebf5',
-    shadowColor:     '#7c6af7',
-    shadowOffset:    { width: 0, height: 2 },
-    shadowOpacity:   0.06,
-    shadowRadius:    8,
-    elevation:       2,
+    borderRadius: 16,
+    marginBottom: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: BORDER,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
-  cardDisabled:      { opacity: 0.55 },
-  cardHeader:        { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 14 },
-  titleRow:          { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 },
-  serviceTitle:      { color: '#0f0f23', fontSize: 15, fontWeight: '700', flexShrink: 1 },
-  categoryBadge:     { backgroundColor: '#f4f0ff', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
-  categoryBadgeText: { color: '#7c6af7', fontSize: 11, fontWeight: '600' },
-  serviceMeta:       { color: '#888', fontSize: 12 },
+  cardDisabled: { opacity: 0.55 },
+  cardStrip: { height: 4 },
+  cardBody: { padding: 16 },
 
-  // Toggle
+  cardTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  cardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  cardEmoji: { fontSize: 20 },
+  cardTitle: { fontSize: 16, fontWeight: '800', color: DARK, flexShrink: 1 },
+
+  metaRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  categoryChip: {
+    backgroundColor: ACCENT_BG,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: '#FFDAC8',
+  },
+  categoryChipText: { color: ACCENT, fontSize: 11, fontWeight: '700' },
+  durationChip: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  durationChipText: { fontSize: 11, color: GREY, fontWeight: '600' },
+
+  cardRight: { alignItems: 'flex-end', gap: 8, marginLeft: 12 },
+  priceBlock: { alignItems: 'flex-end' },
+  priceOriginal: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    textDecorationLine: 'line-through',
+    fontWeight: '600',
+  },
+  priceFinal: { fontSize: 20, fontWeight: '900', color: ACCENT },
+
   toggleBlock: { alignItems: 'flex-end', gap: 2 },
-  toggleLabel: { fontSize: 11, fontWeight: '700' },
-  labelOn:     { color: '#059669' },
-  labelOff:    { color: '#ef4444' },
+  toggleLabel: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+  toggleOn: { color: GREEN },
+  toggleOff: { color: '#EF4444' },
 
-  // Image slots
-  slotsRow:      { flexDirection: 'row', gap: 8 },
-  slot:          { flex: 1, aspectRatio: 4 / 3, borderRadius: 10, overflow: 'hidden', position: 'relative' },
-  slotImage:     { width: '100%', height: '100%' },
-  deleteOverlay: { position: 'absolute', top: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 12 },
-  slotPlaceholder: {
-    flex:           1,
-    aspectRatio:    4 / 3,
-    borderRadius:   10,
-    borderWidth:    1.5,
-    borderColor:    '#e0e0f0',
-    borderStyle:    'dashed',
-    alignItems:     'center',
+  // ── Expand hint ──
+  expandHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: BORDER,
+  },
+  expandHint: { fontSize: 11, color: '#9CA3AF', fontWeight: '600', flex: 1 },
+  discountMiniTag: {
+    backgroundColor: GREEN_BG,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  discountMiniText: { color: GREEN, fontSize: 10, fontWeight: '800' },
+  photoCountTag: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  photoCountText: { fontSize: 10, fontWeight: '700', color: GREY },
+
+  // ── Expanded section ──
+  expandedSection: { marginTop: 14 },
+
+  discountCard: {
+    backgroundColor: GREEN_BG,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  discountHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  discountLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  discountIcon: { fontSize: 16 },
+  discountLabel: { fontSize: 13, fontWeight: '800', color: '#166534' },
+  discountBadge: {
+    backgroundColor: '#D1FAE5',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  discountBadgeText: { color: GREEN, fontSize: 12, fontWeight: '800' },
+  noDiscountText: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
+
+  // ── Photos ──
+  photosSectionLabel: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: DARK,
+    marginBottom: 10,
+  },
+  photosScroll: { gap: 10, paddingBottom: 4 },
+  photoCard: {
+    width: 130,
+    height: 100,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#F3F4F6',
+    marginRight: 10,
+  },
+  photoImage: { width: '100%', height: '100%' },
+  photoDeleteBtn: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
     justifyContent: 'center',
-    gap:            4,
-    backgroundColor: '#fafafa',
   },
-  slotPlaceholderText: { color: '#bbb', fontSize: 10 },
-
-  addMoreBtn:  { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, justifyContent: 'center', paddingVertical: 6 },
-  addMoreText: { color: '#7c6af7', fontSize: 13, fontWeight: '600' },
-  btnDisabled: { opacity: 0.5 },
-
-  // Add service modal
-  modalOverlay: { flex: 1, justifyContent: 'flex-end', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.45)' },
-  modalSheet: {
-    width:                '100%',
-    maxWidth:             520,
-    backgroundColor:      '#fff',
-    borderTopLeftRadius:  20,
-    borderTopRightRadius: 20,
-    padding:              20,
-    paddingBottom:        40,
-    borderWidth:          1,
-    borderColor:          '#f0f0f5',
+  photoDeleteText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  photoPlaceholder: {
+    width: 130,
+    height: 100,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FAFAFA',
+    marginRight: 10,
   },
-  modalHandle: { width: 40, height: 4, backgroundColor: '#e0e0e8', borderRadius: 2, alignSelf: 'center', marginBottom: 14 },
-  modalTitle:  { color: '#0f0f23', fontSize: 18, fontWeight: '800', marginBottom: 16 },
-  addError:    { color: '#ef4444', fontSize: 13, marginBottom: 10 },
-  fieldLabel:  { color: '#888', fontSize: 12, fontWeight: '700', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  photoPlaceholderIcon: { fontSize: 22, marginBottom: 4 },
+  photoPlaceholderText: { color: '#9CA3AF', fontSize: 10, fontWeight: '600' },
+
+  photoAddMore: {
+    width: 100,
+    height: 100,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: ACCENT,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: ACCENT_BG,
+  },
+  photoAddMoreIcon: { fontSize: 24, color: ACCENT, fontWeight: '600' },
+  photoAddMoreText: { color: ACCENT, fontSize: 10, fontWeight: '700', marginTop: 2 },
+
+  // ── Add Service Modal ──
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    width: '100%',
+    maxWidth: 440,
+    maxHeight: '85%',
+    overflow: 'hidden',
+    padding: 20,
+    paddingBottom: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 8,
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: '#E5E7EB',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 14,
+  },
+  modalTitle: { fontSize: 20, fontWeight: '900', color: DARK },
+  modalSub: { fontSize: 13, color: GREY, marginTop: 2, marginBottom: 16 },
+  modalScroll: { marginBottom: 12 },
+
+  errorBanner: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  errorText: { color: '#DC2626', fontSize: 13, fontWeight: '600' },
+
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: GREY,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
   input: {
-    backgroundColor:   '#fafafa',
-    borderWidth:       1,
-    borderColor:       '#e0e0f0',
-    borderRadius:      10,
-    color:             '#0f0f23',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    color: DARK,
     paddingHorizontal: 14,
-    paddingVertical:   10,
-    fontSize:          14,
-    marginBottom:      12,
+    paddingVertical: 12,
+    fontSize: 14,
+    marginBottom: 14,
   },
-  row2:        { flexDirection: 'row', gap: 10 },
-  saveBtn:     { backgroundColor: '#7c6af7', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 4 },
-  saveBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
-  // Category chips
+  twoCol: { flexDirection: 'row', gap: 12 },
+
   catChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     paddingHorizontal: 12,
-    paddingVertical:   6,
-    borderRadius:      20,
-    backgroundColor:   '#fafafa',
-    borderWidth:       1,
-    borderColor:       '#e5e7eb',
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
   },
-  catChipActive:     { backgroundColor: '#7c6af7', borderColor: '#7c6af7' },
-  catChipText:       { color: '#888', fontSize: 12 },
-  catChipTextActive: { color: '#fff', fontWeight: '600' },
+  catChipActive: { backgroundColor: ACCENT, borderColor: ACCENT },
+  catChipEmoji: { fontSize: 14 },
+  catChipText: { color: GREY, fontSize: 12, fontWeight: '600' },
+  catChipTextActive: { color: '#fff', fontWeight: '800' },
+
+  modalFooter: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: BORDER,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  modalCancelText: { color: GREY, fontWeight: '700', fontSize: 14 },
+  modalSaveBtn: {
+    flex: 2,
+    backgroundColor: ACCENT,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    shadowColor: ACCENT,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  modalSaveText: { color: '#fff', fontWeight: '800', fontSize: 14 },
 })

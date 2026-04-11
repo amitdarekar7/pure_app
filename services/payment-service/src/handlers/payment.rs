@@ -12,7 +12,15 @@ pub struct CreateIntentRequest {
     pub amount_cents:    i64,
     pub currency:        String,
     pub idempotency_key: String,
+    #[serde(default)]
+    pub commission_cents: Option<i64>,
+    #[serde(default)]
+    pub provider_id:     Option<Uuid>,
+    #[serde(default = "default_intent_type")]
+    pub intent_type:     String,
 }
+
+fn default_intent_type() -> String { "booking".to_string() }
 
 #[derive(Serialize)]
 pub struct CreateIntentResponse {
@@ -49,16 +57,23 @@ pub async fn create_intent(
     }
 
     let intent_id = Uuid::new_v4();
+    let commission = req.commission_cents.unwrap_or(0);
+    let provider_cents = req.amount_cents - commission;
 
     sqlx::query!(
         r#"INSERT INTO payment_intents
-             (id, user_id, amount_cents, currency, status, idempotency_key, metadata)
-           VALUES ($1, $2, $3, $4, 'pending', $5, '{}'::jsonb)"#,
+             (id, user_id, amount_cents, currency, status, idempotency_key, metadata,
+              commission_cents, provider_cents, provider_id, intent_type)
+           VALUES ($1, $2, $3, $4, 'pending', $5, '{}'::jsonb, $6, $7, $8, $9)"#,
         intent_id,
         req.user_id,
         req.amount_cents,
         req.currency,
         req.idempotency_key,
+        commission,
+        provider_cents,
+        req.provider_id,
+        req.intent_type,
     )
     .execute(&state.db)
     .await
@@ -111,7 +126,7 @@ pub async fn confirm_payment(
         r#"UPDATE payment_intents
            SET status = 'succeeded', processor_ref = $2, updated_at = NOW()
            WHERE id = $1 AND status = 'pending'
-           RETURNING id, user_id, amount_cents, currency"#,
+           RETURNING id, user_id, amount_cents, currency, commission_cents, provider_cents, provider_id, intent_type"#,
         req.payment_intent_id,
         processor_ref,
     )
@@ -121,14 +136,14 @@ pub async fn confirm_payment(
 
     let row = result.ok_or(StatusCode::CONFLICT)?;
 
-    // Append ledger entry (never updated or deleted — enforced by DB rules)
+    // 1. Debit user wallet (full amount)
     let entry_id = Uuid::new_v4();
     sqlx::query!(
         r#"INSERT INTO ledger_entries
              (id, wallet_id, payment_intent_id, entry_type, amount_cents,
               currency, balance_after_cents, description)
            SELECT $1, w.id, $2, 'debit', $3, $4,
-                  (w.balance_cents - $3), 'Purchase payment'
+                  (w.balance_cents - $3), $6
            FROM wallets w
            WHERE w.user_id = $5"#,
         entry_id,
@@ -136,16 +151,100 @@ pub async fn confirm_payment(
         row.amount_cents,
         row.currency,
         row.user_id,
+        format!("{} payment", row.intent_type),
     )
     .execute(&state.db)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // 2. Credit platform wallet (commission or full amount for promotions/subscriptions)
+    let platform_credit = if row.intent_type == "booking" { row.commission_cents } else { row.amount_cents };
+    if platform_credit > 0 {
+        let platform_wallet_id: Uuid = "00000000-0000-0000-0000-000000000001".parse().unwrap();
+        let platform_entry_id = Uuid::new_v4();
+        sqlx::query!(
+            r#"INSERT INTO ledger_entries
+                 (id, wallet_id, payment_intent_id, entry_type, amount_cents,
+                  currency, balance_after_cents, description)
+               VALUES ($1, $2, $3, 'credit', $4, $5, 0, $6)"#,
+            platform_entry_id,
+            platform_wallet_id,
+            row.id,
+            platform_credit,
+            row.currency,
+            if row.intent_type == "booking" { "Booking commission".to_string() }
+            else { format!("{} revenue", row.intent_type) },
+        )
+        .execute(&state.db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        // Update platform wallet balance
+        sqlx::query!(
+            "UPDATE wallets SET balance_cents = balance_cents + $1, updated_at = NOW() WHERE id = $2",
+            platform_credit,
+            platform_wallet_id,
+        )
+        .execute(&state.db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
+
+    // 3. Credit provider wallet (booking amount minus commission) — only for bookings
+    if row.intent_type == "booking" && row.provider_cents > 0 {
+        if let Some(provider_id) = row.provider_id {
+            // Ensure provider has a wallet (upsert)
+            sqlx::query!(
+                r#"INSERT INTO wallets (user_id, balance_cents, currency)
+                   VALUES ($1, 0, $2)
+                   ON CONFLICT (user_id) DO NOTHING"#,
+                provider_id,
+                row.currency,
+            )
+            .execute(&state.db)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+            let provider_entry_id = Uuid::new_v4();
+            sqlx::query!(
+                r#"INSERT INTO ledger_entries
+                     (id, wallet_id, payment_intent_id, entry_type, amount_cents,
+                      currency, balance_after_cents, description)
+                   SELECT $1, w.id, $2, 'credit', $3, $4,
+                          (w.balance_cents + $3), 'Booking payout'
+                   FROM wallets w
+                   WHERE w.user_id = $5"#,
+                provider_entry_id,
+                row.id,
+                row.provider_cents,
+                row.currency,
+                provider_id,
+            )
+            .execute(&state.db)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+            // Update provider wallet balance
+            sqlx::query!(
+                "UPDATE wallets SET balance_cents = balance_cents + $1, updated_at = NOW() WHERE user_id = $2",
+                row.provider_cents,
+                provider_id,
+            )
+            .execute(&state.db)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        }
+    }
 
     // Outbox event for downstream consumers
     let completed_payload = serde_json::json!({
         "payment_intent_id": row.id.to_string(),
         "user_id":           row.user_id.to_string(),
         "amount_cents":      row.amount_cents,
+        "commission_cents":  row.commission_cents,
+        "provider_cents":    row.provider_cents,
+        "provider_id":       row.provider_id.map(|id| id.to_string()),
+        "intent_type":       &row.intent_type,
         "currency":          &row.currency,
         "processor_ref":     &processor_ref,
         "ledger_entry_id":   entry_id.to_string(),

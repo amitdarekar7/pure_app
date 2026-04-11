@@ -2,7 +2,7 @@
   "name": "@pure-app/mobile",
   "version": "0.1.0",
   "private": true,
-  "main": "expo-router/entry",
+  "main": "index.js",
   "scripts": {
     "dev": "expo start",
     "android": "expo run:android",
@@ -20,7 +20,8 @@
     "@react-native-community/datetimepicker": "^8.0.1",
     "expo": "~51.0.0",
     "expo-image-picker": "~15.1.0",
-    "expo-router": "3.5.24",
+    "expo-location": "~17.0.1",
+    "expo-router": "^3.5.24",
     "expo-status-bar": "~1.12.1",
     "firebase": "^12.11.0",
     "react": "18.2.0",

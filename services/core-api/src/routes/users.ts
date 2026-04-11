@@ -4,7 +4,9 @@ import { requireAuth } from '../middleware/auth'
 interface UpdateProfileBody {
   displayName?: string
   avatarUrl?:   string
+  phone?:       string
   bio?:         string
+  address?:     string
   locale?:      string
   timezone?:    string
 }
@@ -28,7 +30,7 @@ export async function userRoutes(app: FastifyInstance) {
     const result = await app.db.query(
       `SELECT
          u.id, u.email, u.phone, u.status, u.created_at,
-         p.display_name, p.avatar_url, p.bio, p.locale, p.timezone
+         p.display_name, p.avatar_url, p.bio, p.address, p.locale, p.timezone
        FROM users u
        LEFT JOIN profiles p ON p.user_id = u.id
        WHERE u.firebase_uid = $1`,
@@ -45,7 +47,7 @@ export async function userRoutes(app: FastifyInstance) {
   // ── PATCH /v1/users/me ────────────────────────────────────────────────────
   app.patch<{ Body: UpdateProfileBody }>('/me', async (req, reply) => {
     const uid = req.firebaseUid
-    const { displayName, avatarUrl, bio, locale, timezone } = req.body
+    const { displayName, avatarUrl, phone, bio, address, locale, timezone } = req.body
 
     const userResult = await app.db.query(
       `SELECT id FROM users WHERE firebase_uid = $1`,
@@ -58,17 +60,26 @@ export async function userRoutes(app: FastifyInstance) {
 
     const userId: string = userResult.rows[0].id
 
+    // Update phone on the users row if provided
+    if (phone !== undefined) {
+      await app.db.query(
+        `UPDATE users SET phone = $1, updated_at = NOW() WHERE id = $2`,
+        [phone.trim() || null, userId],
+      )
+    }
+
     await app.db.query(
-      `INSERT INTO profiles (user_id, display_name, avatar_url, bio, locale, timezone)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO profiles (user_id, display_name, avatar_url, bio, address, locale, timezone)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (user_id) DO UPDATE SET
          display_name = COALESCE(EXCLUDED.display_name, profiles.display_name),
          avatar_url   = COALESCE(EXCLUDED.avatar_url,   profiles.avatar_url),
          bio          = COALESCE(EXCLUDED.bio,          profiles.bio),
+         address      = COALESCE(EXCLUDED.address,      profiles.address),
          locale       = COALESCE(EXCLUDED.locale,       profiles.locale),
          timezone     = COALESCE(EXCLUDED.timezone,     profiles.timezone),
          updated_at   = NOW()`,
-      [userId, displayName ?? null, avatarUrl ?? null, bio ?? null, locale ?? 'en-US', timezone ?? 'UTC'],
+      [userId, displayName ?? null, avatarUrl ?? null, bio ?? null, address ?? null, locale ?? 'en-US', timezone ?? 'UTC'],
     )
 
     return reply.status(204).send()

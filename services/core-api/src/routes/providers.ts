@@ -46,6 +46,9 @@ export async function providerRoutes(app: FastifyInstance) {
         duration_mins: number
         likes_count:   number
         is_liked:      boolean
+        is_featured:   boolean
+        is_boosted:    boolean
+        discount_pct:  number
       }>(
         `SELECT
            p.id,
@@ -56,8 +59,11 @@ export async function providerRoutes(app: FastifyInstance) {
            ps.title      AS service_title,
            ps.price_paise,
            ps.duration_mins,
+           ps.discount_pct,
            p.likes_count,
-           CASE WHEN pl.provider_id IS NOT NULL THEN TRUE ELSE FALSE END AS is_liked
+           CASE WHEN pl.provider_id IS NOT NULL THEN TRUE ELSE FALSE END AS is_liked,
+           p.is_featured,
+           p.is_boosted
          FROM   providers        p
          JOIN   provider_services ps ON ps.provider_id   = p.id
          LEFT   JOIN areas        a  ON a.id             = p.area_id
@@ -68,11 +74,19 @@ export async function providerRoutes(app: FastifyInstance) {
            AND  ps.category_slug = $2
            AND  p.status         = 'active'
            AND  ps.is_available  = true
-         ORDER  BY p.likes_count DESC, p.name ASC`,
+         ORDER  BY p.is_featured DESC, p.is_boosted DESC, p.likes_count DESC, p.name ASC`,
         [cityId, category, userId],
       )
 
-      return reply.send({ providers: rows })
+      // Compute discounted price for frontend convenience
+      const providers = rows.map(r => ({
+        ...r,
+        discounted_price_paise: r.discount_pct > 0
+          ? Math.round(r.price_paise * (1 - r.discount_pct / 100))
+          : null,
+      }))
+
+      return reply.send({ providers })
     },
   )
 
@@ -223,6 +237,9 @@ export async function providerRoutes(app: FastifyInstance) {
         category_slug: string
         likes_count:   number
         is_liked:      boolean
+        is_featured:   boolean
+        is_boosted:    boolean
+        discount_pct:  number
       }>(
         `SELECT
            p.id,
@@ -236,7 +253,10 @@ export async function providerRoutes(app: FastifyInstance) {
            ps.price_paise,
            ps.duration_mins,
            ps.category_slug,
+           ps.discount_pct,
            p.likes_count,
+           p.is_featured,
+           p.is_boosted,
            CASE WHEN pl.provider_id IS NOT NULL THEN TRUE ELSE FALSE END AS is_liked
          FROM   providers         p
          JOIN   provider_services ps ON ps.provider_id = p.id
@@ -254,7 +274,71 @@ export async function providerRoutes(app: FastifyInstance) {
       )
 
       if (!rows[0]) return reply.status(404).send({ error: 'provider not found' })
-      return reply.send({ provider: rows[0] })
+
+      const row = rows[0]
+      const discountedPricePaise = row.discount_pct > 0
+        ? Math.round(row.price_paise * (1 - row.discount_pct / 100))
+        : null
+
+      // Fetch ALL services for this provider
+      const { rows: allServices } = await app.db.query<{
+        id:            string
+        title:         string
+        category_slug: string
+        price_paise:   number
+        duration_mins: number
+        discount_pct:  number
+        is_available:  boolean
+      }>(
+        `SELECT id, title, category_slug, price_paise, duration_mins, discount_pct, is_available
+           FROM provider_services
+          WHERE provider_id = $1 AND is_available = true
+          ORDER BY price_paise ASC`,
+        [id],
+      )
+
+      const services = allServices.map(s => ({
+        ...s,
+        discounted_price_paise: s.discount_pct > 0
+          ? Math.round(s.price_paise * (1 - s.discount_pct / 100))
+          : null,
+      }))
+
+      // Fetch ALL images for this provider's services
+      const { rows: images } = await app.db.query<{
+        id:         string
+        service_id: string
+        image_url:  string
+        sort_order: number
+      }>(
+        `SELECT psi.id, psi.service_id, psi.image_url, psi.sort_order
+           FROM provider_service_images psi
+           JOIN provider_services ps ON ps.id = psi.service_id
+          WHERE ps.provider_id = $1
+          ORDER BY psi.sort_order ASC, psi.created_at ASC`,
+        [id],
+      )
+
+      // Fetch weekly availability
+      const { rows: availability } = await app.db.query<{
+        day_of_week: number
+        open_time:   string
+        close_time:  string
+        is_closed:   boolean
+      }>(
+        `SELECT day_of_week, open_time::text, close_time::text, is_closed
+           FROM provider_availability
+          WHERE provider_id = $1
+          ORDER BY day_of_week ASC`,
+        [id],
+      )
+
+      return reply.send({
+        provider: { ...row, discounted_price_paise: discountedPricePaise },
+        services,
+        images,
+        availability,
+      })
     },
   )
 }

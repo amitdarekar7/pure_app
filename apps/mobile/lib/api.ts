@@ -74,7 +74,7 @@ export const ProvidersAPI = {
       `${CORE}/v1/providers?cityId=${encodeURIComponent(cityId)}&category=${encodeURIComponent(category)}`,
     ),
   get: (id: string, serviceId?: string) =>
-    _authOrGet<{ provider: ProviderDetail }>(
+    _authOrGet<{ provider: ProviderDetail; services: ProviderServiceItem[]; images: ProviderImage[]; availability: ProviderAvailability[] }>(
       `${CORE}/v1/providers/${encodeURIComponent(id)}${serviceId ? `?serviceId=${encodeURIComponent(serviceId)}` : ''}`,
     ),
   like: (id: string) =>
@@ -85,10 +85,27 @@ export const ProvidersAPI = {
 
 // ─── Bookings API ─────────────────────────────────────────────────────────────
 export const BookingsAPI = {
-  create: (p: { providerServiceId: string; scheduledAt: string; notes?: string }) =>
+  create: (p: {
+    providerServiceId: string
+    scheduledAt:       string
+    notes?:            string
+    paymentMode?:      'prepaid' | 'pay_at_venue'
+  }) =>
     _auth<{ booking: Booking }>('POST', `${CORE}/v1/bookings`, p),
   my: () =>
     _auth<{ bookings: BookingSummary[] }>('GET', `${CORE}/v1/bookings/my`),
+  checkin: (id: string, otp: string) =>
+    _auth<{ booking: { id: string; status: string; checked_in_at: string } }>(
+      'POST', `${CORE}/v1/bookings/${encodeURIComponent(id)}/checkin`, { otp },
+    ),
+  cancel: (id: string, reason?: string) =>
+    _auth<{ booking: { id: string; status: string; cancelled_by: string; cancellation_fee_paise: number } }>(
+      'POST', `${CORE}/v1/bookings/${encodeURIComponent(id)}/cancel`, { reason },
+    ),
+  complete: (id: string) =>
+    _auth<{ booking: { id: string; status: string } }>(
+      'POST', `${CORE}/v1/bookings/${encodeURIComponent(id)}/complete`, {},
+    ),
 }
 
 // ─── Provider Portal API (provider-authenticated) ────────────────────────────
@@ -150,12 +167,47 @@ export const ProviderPortalAPI = {
       { isAvailable },
     ),
 
+  setDiscount: (serviceId: string, discountPct: number) =>
+    _auth<{ ok: boolean }>(
+      'PATCH',
+      `${CORE}/v1/provider/services/${encodeURIComponent(serviceId)}`,
+      { discountPct },
+    ),
+
   createService: (p: { categorySlug: string; title: string; pricePaise: number; durationMins: number }) =>
     _auth<{ service: ProviderService }>(
       'POST',
       `${CORE}/v1/provider/services`,
       p,
     ),
+
+  updateProfile: (p: { name?: string; phone?: string; address?: string; profileImageUrl?: string }) =>
+    _auth<{ provider: ProviderProfile }>(
+      'PATCH',
+      `${CORE}/v1/provider/me`,
+      p,
+    ),
+}
+
+// ─── Promotions API ───────────────────────────────────────────────────────────
+export const PromotionsAPI = {
+  /** List available promotion products (featured, boost) */
+  products: () =>
+    _get<{ products: PromotionProduct[] }>(`${CORE}/v1/promotions/products`),
+
+  /** Purchase a promotion (provider-authenticated) */
+  purchase: (productSlug: string) =>
+    _auth<{ promotion: PromotionRecord; payment_intent_id: string }>(
+      'POST', `${CORE}/v1/promotions/purchase`, { productSlug },
+    ),
+
+  /** Get current provider's promotions (provider-authenticated) */
+  my: () =>
+    _auth<{ promotions: PromotionRecord[] }>('GET', `${CORE}/v1/promotions/my`),
+
+  /** Get platform config (commission rate, promo prices) */
+  config: () =>
+    _get<{ config: Record<string, string> }>(`${CORE}/v1/promotions/config`),
 }
 
 // ─── AI API ───────────────────────────────────────────────────────────────────
@@ -170,8 +222,11 @@ export const AIAPI = {
 export interface User {
   id:           string
   email:        string
+  phone:        string | null
   display_name: string | null
+  avatar_url:   string | null
   bio:          string | null
+  address:      string | null
   locale:       string
   timezone:     string | null
   status:       string
@@ -180,7 +235,10 @@ export interface User {
 
 export interface UpdatePayload {
   displayName: string
+  avatarUrl:   string
+  phone:       string
   bio:         string
+  address:     string
   locale:      string
   timezone:    string
 }
@@ -195,13 +253,28 @@ export interface SearchHit {
   _id:     string
   _score:  number
   _source: {
-    title?:       string
-    description?: string
-    price_cents?: number
-    tags?:        string[]
-    category?:    string
+    provider_id?:   string
+    provider_name?: string
+    service_id?:    string
+    service_title?: string
+    category_slug?: string
+    address?:       string | null
+    city_name?:     string
+    area_name?:     string | null
+    price_paise?:   number
+    duration_mins?: number
+    likes_count?:   number
+    is_featured?:   boolean
+    is_boosted?:    boolean
+    discount_pct?:          number
+    discounted_price_paise?: number
+    status?:        string
   }
-  highlight?: { title?: string[]; description?: string[] }
+  highlight?: {
+    provider_name?: string[]
+    service_title?: string[]
+    area_name?:     string[]
+  }
 }
 
 export interface SearchResponse {
@@ -214,10 +287,13 @@ export interface RecommendedItem {
 }
 
 export interface CreateIntentPayload {
-  user_id:         string
-  amount_cents:    number
-  currency:        string
-  idempotency_key: string
+  user_id:          string
+  amount_cents:     number
+  currency:         string
+  idempotency_key:  string
+  commission_cents?: number
+  provider_id?:     string
+  intent_type?:     'booking' | 'promotion' | 'subscription'
 }
 
 export interface PaymentIntent {
@@ -252,6 +328,10 @@ export interface Provider {
   duration_mins: number
   likes_count:   number
   is_liked:      boolean
+  is_featured:   boolean
+  is_boosted:    boolean
+  discount_pct:          number
+  discounted_price_paise: number | null
 }
 
 export interface ProviderDetail extends Provider {
@@ -260,27 +340,64 @@ export interface ProviderDetail extends Provider {
   category_slug: string
 }
 
+export interface ProviderServiceItem {
+  id:                     string
+  title:                  string
+  category_slug:          string
+  price_paise:            number
+  duration_mins:          number
+  discount_pct:           number
+  is_available:           boolean
+  discounted_price_paise: number | null
+}
+
+export interface ProviderImage {
+  id:         string
+  service_id: string
+  image_url:  string
+  sort_order: number
+}
+
+export interface ProviderAvailability {
+  day_of_week: number
+  open_time:   string
+  close_time:  string
+  is_closed:   boolean
+}
+
 export interface Booking {
-  id:           string
-  status:       string
-  scheduled_at: string
+  id:                    string
+  status:                string
+  scheduled_at:          string
+  checkin_otp?:          string
+  payment_mode?:         'prepaid' | 'pay_at_venue'
+  price_paise?:          number
+  original_price_paise?: number
+  discount_pct?:         number
 }
 
 export interface BookingSummary {
-  id:            string
-  provider_name: string
-  service_title: string
-  scheduled_at:  string
-  status:        string
-  price_paise:   number
+  id:                    string
+  provider_name:         string
+  service_title:         string
+  scheduled_at:          string
+  status:                string
+  price_paise:           number
+  original_price_paise:  number | null
+  discount_pct:          number
+  payment_mode:          string
+  checkin_otp:           string | null
+  checked_in_at:         string | null
+  no_show:               boolean
 }
 
 export interface ProviderProfile {
-  id:      string
-  name:    string
-  address: string | null
-  phone:   string | null
-  status:  string
+  id:                string
+  name:              string
+  address:           string | null
+  phone:             string | null
+  status:            string
+  profile_image_url: string | null
 }
 
 export interface ProviderService {
@@ -290,6 +407,7 @@ export interface ProviderService {
   price_paise:   number
   duration_mins: number
   is_available:  boolean
+  discount_pct:  number
 }
 
 export interface ProviderStats {
@@ -323,6 +441,25 @@ export interface ServiceImage {
   image_url:  string
   sort_order: number
   created_at: string
+}
+
+export interface PromotionProduct {
+  id:             string
+  slug:           string
+  name:           string
+  description:    string | null
+  price_paise:    number
+  duration_hours: number
+  promotion_type: 'featured' | 'boost'
+}
+
+export interface PromotionRecord {
+  id:             string
+  promotion_type: 'featured' | 'boost'
+  product_name:   string
+  status:         'active' | 'expired' | 'cancelled'
+  starts_at:      string
+  expires_at:     string
 }
 
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────

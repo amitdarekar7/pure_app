@@ -6,7 +6,8 @@
 -- ┌─────────────────────────────────────────────────────────────────────────────┐
 -- │  DATABASE 1: core_db  (PostgreSQL 16 — port 5432)                         │
 -- │  Service:    core-api (Node.js / Fastify)                                 │
--- │  Tables:     13                                                            │
+-- │  Tables:     17 (+ platform_config, promotion_products,                   │
+-- │              provider_promotions, provider_subscriptions)                   │
 -- └─────────────────────────────────────────────────────────────────────────────┘
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -192,6 +193,60 @@ CREATE TABLE reviews (
 );
 
 CREATE INDEX idx_reviews_provider_id ON reviews(provider_id);
+
+-- ── 14. platform_config ─────────────────────────────────────────────────────
+CREATE TABLE platform_config (
+  key         TEXT        PRIMARY KEY,
+  value       TEXT        NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ── 15. promotion_products ──────────────────────────────────────────────────
+CREATE TABLE promotion_products (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug            TEXT        UNIQUE NOT NULL,
+  name            TEXT        NOT NULL,
+  description     TEXT,
+  price_paise     INTEGER     NOT NULL,
+  duration_hours  INTEGER     NOT NULL,
+  promotion_type  TEXT        NOT NULL CHECK (promotion_type IN ('featured', 'boost')),
+  is_active       BOOLEAN     NOT NULL DEFAULT true,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ── 16. provider_promotions ─────────────────────────────────────────────────
+CREATE TABLE provider_promotions (
+  id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider_id           UUID        NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+  promotion_product_id  UUID        NOT NULL REFERENCES promotion_products(id),
+  payment_intent_id     TEXT,
+  promotion_type        TEXT        NOT NULL CHECK (promotion_type IN ('featured', 'boost')),
+  status                TEXT        NOT NULL DEFAULT 'active'
+                                    CHECK (status IN ('active', 'expired', 'cancelled')),
+  starts_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at            TIMESTAMPTZ NOT NULL,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_promo_provider ON provider_promotions(provider_id);
+CREATE INDEX idx_promo_active   ON provider_promotions(status, expires_at) WHERE status = 'active';
+
+-- ── 17. provider_subscriptions ──────────────────────────────────────────────
+CREATE TABLE provider_subscriptions (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider_id     UUID        NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+  plan            TEXT        NOT NULL DEFAULT 'quarterly'
+                              CHECK (plan IN ('quarterly', 'yearly')),
+  price_paise     INTEGER     NOT NULL DEFAULT 14900,
+  status          TEXT        NOT NULL DEFAULT 'active'
+                              CHECK (status IN ('active', 'expired', 'cancelled')),
+  starts_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at      TIMESTAMPTZ NOT NULL,
+  payment_intent_id TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_sub_provider ON provider_subscriptions(provider_id);
 
 
 -- ┌─────────────────────────────────────────────────────────────────────────────┐
