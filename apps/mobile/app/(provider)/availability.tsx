@@ -361,7 +361,7 @@ const CARD_BG    = '#FFFFFF'
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#F9FAFB' },
   scrollContent: { alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 },
-  inner: { width: '100%', maxWidth: 520 },
+  inner: { width: '100%', maxWidth: 560 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F9FAFB' },
 
   // ── Header card ──

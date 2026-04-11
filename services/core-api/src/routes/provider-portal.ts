@@ -578,8 +578,8 @@ export async function providerPortalRoutes(app: FastifyInstance) {
       }
 
       const { imageUrl, sortOrder = 0 } = req.body
-      if (!imageUrl || typeof imageUrl !== 'string' || imageUrl.length > 2048) {
-        return reply.status(400).send({ error: 'imageUrl is required (max 2048 chars)' })
+      if (!imageUrl || typeof imageUrl !== 'string' || imageUrl.length > 5 * 1024 * 1024) {
+        return reply.status(400).send({ error: 'imageUrl is required (max 5 MB)' })
       }
 
       // Verify service belongs to this provider

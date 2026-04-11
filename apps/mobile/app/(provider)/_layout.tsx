@@ -31,12 +31,14 @@ function ProviderTabs() {
           height:           58,
           paddingBottom:    6,
           width:            '100%',
-          maxWidth:         520,
+          maxWidth:         560,
           alignSelf:        'center',
         },
         tabBarActiveTintColor:   '#7c6af7',
         tabBarInactiveTintColor: '#bbb',
         headerShown:             false,
+        tabBarItemStyle: { flex: 1 },
+        tabBarLabelStyle: { fontSize: 10 },
       }}
     >
       <Tabs.Screen
@@ -66,8 +68,16 @@ function ProviderTabs() {
       <Tabs.Screen
         name="services"
         options={{
-          title:       'Services & Images',
+          title:       'Services',
           tabBarLabel: 'Services',
+          tabBarIcon:  ({ color }) => <TabIcon name="pricetags-outline" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="images"
+        options={{
+          title:       'Images',
+          tabBarLabel: 'Photos',
           tabBarIcon:  ({ color }) => <TabIcon name="images-outline" color={color} />,
         }}
       />

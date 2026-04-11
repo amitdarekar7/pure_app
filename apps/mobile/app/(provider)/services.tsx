@@ -330,7 +330,7 @@ export default function ProviderServicesScreen() {
           <View style={styles.headerTitleRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.headerTitle}>Services</Text>
-              <Text style={styles.headerHint}>Manage your services, pricing &amp; photos</Text>
+              <Text style={styles.headerHint}>Manage your services, pricing &amp; discounts</Text>
             </View>
             <Pressable style={styles.addBtn} onPress={() => setShowAdd(true)}>
               <Text style={styles.addBtnIcon}>+</Text>
@@ -457,16 +457,11 @@ export default function ProviderServicesScreen() {
                   {/* Expand hint */}
                   <View style={styles.expandHintRow}>
                     <Text style={styles.expandHint}>
-                      {isExpanded ? '▲ Tap to collapse' : '▼ Tap to expand — discount & photos'}
+                      {isExpanded ? '▲ Tap to collapse' : '▼ Tap to expand — discount'}
                     </Text>
                     {discountPct > 0 && !isExpanded && (
                       <View style={styles.discountMiniTag}>
                         <Text style={styles.discountMiniText}>{discountPct}% OFF</Text>
-                      </View>
-                    )}
-                    {svcImages.length > 0 && !isExpanded && (
-                      <View style={styles.photoCountTag}>
-                        <Text style={styles.photoCountText}>📷 {svcImages.length}</Text>
                       </View>
                     )}
                   </View>
@@ -497,61 +492,6 @@ export default function ProviderServicesScreen() {
                           onSelect={(pct) => updateDiscount(svc.id, pct)}
                         />
                       </View>
-
-                      {/* ── Image gallery ── */}
-                      <Text style={styles.photosSectionLabel}>📷 Photos</Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photosScroll}>
-                        {slots.map((img, idx) =>
-                          img ? (
-                            <View key={(img as ServiceImage).id} style={styles.photoCard}>
-                              <Image
-                                source={{ uri: (img as ServiceImage).image_url }}
-                                style={styles.photoImage}
-                                resizeMode="cover"
-                              />
-                              <Pressable
-                                style={styles.photoDeleteBtn}
-                                onPress={() => deleteImage(svc.id, (img as ServiceImage).id)}
-                                hitSlop={8}
-                              >
-                                <Text style={styles.photoDeleteText}>✕</Text>
-                              </Pressable>
-                            </View>
-                          ) : (
-                            <Pressable
-                              key={`placeholder-${idx}`}
-                              style={styles.photoPlaceholder}
-                              onPress={() => pickAndUpload(svc.id)}
-                              disabled={isUploading}
-                            >
-                              {isUploading && idx === svcImages.length ? (
-                                <ActivityIndicator size="small" color={ACCENT} />
-                              ) : (
-                                <>
-                                  <Text style={styles.photoPlaceholderIcon}>📷</Text>
-                                  <Text style={styles.photoPlaceholderText}>Add Photo</Text>
-                                </>
-                              )}
-                            </Pressable>
-                          ),
-                        )}
-                        {/* Additional upload if all slots filled */}
-                        {svcImages.length >= IMAGE_SLOTS && (
-                          <Pressable
-                            style={styles.photoAddMore}
-                            onPress={() => pickAndUpload(svc.id)}
-                            disabled={isUploading}
-                          >
-                            {isUploading
-                              ? <ActivityIndicator size="small" color={ACCENT} />
-                              : <>
-                                  <Text style={styles.photoAddMoreIcon}>+</Text>
-                                  <Text style={styles.photoAddMoreText}>Add More</Text>
-                                </>
-                            }
-                          </Pressable>
-                        )}
-                      </ScrollView>
                     </View>
                   )}
                 </View>
@@ -661,11 +601,12 @@ const styles = StyleSheet.create({
   // ── Header ──
   headerCard: {
     backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: BORDER,
+    paddingHorizontal: 18,
+    paddingTop: 14,
+    paddingBottom: 18,
+    borderBottomLeftRadius: 18,
+    borderBottomRightRadius: 18,
+    marginBottom: 2,
   },
   headerTop: {
     flexDirection: 'row',

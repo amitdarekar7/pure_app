@@ -189,7 +189,7 @@ export default function ProviderDashboard() {
             <Text style={styles.actionSub}>Business hours</Text>
           </Pressable>
 
-          <Pressable style={styles.actionCard} onPress={() => router.push('/(provider)/services')}>
+          <Pressable style={styles.actionCard} onPress={() => router.push('/(provider)/images')}>
             <View style={[styles.actionIcon, { backgroundColor: '#FCE7F3' }]}>
               <Text style={styles.actionEmoji}>📸</Text>
             </View>
@@ -284,7 +284,7 @@ const BORDER    = '#F3F4F6'
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#F9FAFB' },
   scrollContent: { alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 },
-  inner: { width: '100%', maxWidth: 520 },
+  inner: { width: '100%', maxWidth: 560 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F9FAFB' },
 
   // ── Hero header ──
