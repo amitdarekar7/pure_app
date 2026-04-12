@@ -56,10 +56,16 @@ function statusMeta(status: Status): { label: string; color: string; bg: string;
 // ─── component ────────────────────────────────────────────────────────────────
 
 export default function BookingsScreen() {
-  const { user } = useAuth()
+  const { user, isLoading: authLoading } = useAuth()
   const router = useRouter()
   const { width } = useWindowDimensions()
   const maxW = width >= 1024 ? 760 : width >= 600 ? 640 : Math.min(width, 520)
+
+  // Redirect to login if not signed in
+  useEffect(() => {
+    if (!authLoading && !user) router.replace('/(auth)/login?returnTo=/(tabs)/bookings')
+  }, [authLoading, user])
+
   const [bookings,   setBookings]   = useState<BookingSummary[]>([])
   const [loading,    setLoading]    = useState(true)
   const [refreshing, setRefreshing] = useState(false)

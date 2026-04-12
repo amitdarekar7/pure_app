@@ -13,7 +13,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import * as ImagePicker from 'expo-image-picker'
 import * as Location from 'expo-location'
 import { useRouter } from 'expo-router'
@@ -57,10 +57,15 @@ function Avatar({
 }
 
 export default function ProfileScreen() {
-  const { user, logout, refreshUser } = useAuth()
+  const { user, logout, refreshUser, isLoading: authLoading } = useAuth()
   const router = useRouter()
   const { width } = useWindowDimensions()
   const maxW = width >= 1024 ? 760 : width >= 600 ? 640 : Math.min(width, 520)
+
+  // Redirect to login if not signed in
+  useEffect(() => {
+    if (!authLoading && !user) router.replace('/(auth)/login?returnTo=/(tabs)/profile')
+  }, [authLoading, user])
 
   const [editing,       setEditing]       = useState(false)
   const [saving,        setSaving]        = useState(false)
