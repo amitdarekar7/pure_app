@@ -34,6 +34,8 @@ const CAT_EMOJI: Record<string, string> = {
   haircut: '💇', hair_color: '🎨', facial: '🧖', waxing: '🪒',
   manicure: '💅', pedicure: '🦶', massage: '💆', makeup: '💄',
   threading: '🧵', shaving: '🪮', spa: '🧴', bridal: '👰',
+  hairspa: '🧴', groommakeup: '🤵', beard: '🧔',
+  sidermakeup: '👩‍👩‍👧',
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────

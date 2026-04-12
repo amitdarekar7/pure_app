@@ -384,6 +384,20 @@ rzp.open();
               </View>
             )}
 
+            {/* ── Check-in OTP (visible until end of scheduled date) ── */}
+            {b.checkin_otp && !b.checked_in_at && ['pending', 'confirmed', 'in_progress'].includes(b.status) && (() => { const s = new Date(b.scheduled_at); s.setHours(23,59,59,999); return s >= new Date(); })() && (
+              <View style={styles.otpStrip}>
+                <View style={styles.otpLeft}>
+                  <Ionicons name="key-outline" size={16} color="#7c6af7" />
+                  <View>
+                    <Text style={styles.otpStripLabel}>Check-in OTP</Text>
+                    <Text style={styles.otpStripHint}>Share with the provider on arrival</Text>
+                  </View>
+                </View>
+                <Text style={styles.otpStripCode}>{b.checkin_otp}</Text>
+              </View>
+            )}
+
             {/* Two payment options after confirmation */}
             {needsPay && (
               <View style={styles.payChoiceRow}>
@@ -578,4 +592,26 @@ const styles = StyleSheet.create({
     borderColor: ACCENT,
   },
   payVenueBtnText: { color: ACCENT, fontSize: 13, fontWeight: '700' },
+
+  otpStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: '#f5f3ff',
+    borderWidth: 1,
+    borderColor: '#e0dbff',
+    borderStyle: 'dashed',
+  },
+  otpLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  otpStripLabel: { fontSize: 11, fontWeight: '700', color: '#7c6af7', letterSpacing: 0.4, textTransform: 'uppercase' },
+  otpStripHint:  { fontSize: 10, color: '#9ca3af', marginTop: 1 },
+  otpStripCode:  { fontSize: 22, fontWeight: '900', color: '#0f0f23', letterSpacing: 6 },
 })

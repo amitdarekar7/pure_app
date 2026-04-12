@@ -45,6 +45,10 @@ const CATEGORIES = [
   { slug: 'partymakeup',   label: 'Party Makeup',    icon: '🎉' },
   { slug: 'straightening', label: 'Straightening',   icon: '🪮' },
   { slug: 'nailext',       label: 'Nail Extensions', icon: '💎' },
+  { slug: 'hairspa',       label: 'Hair Spa',        icon: '🧴' },
+  { slug: 'groommakeup',   label: 'Groom Makeup',    icon: '🤵' },
+  { slug: 'beard',         label: 'Beard',           icon: '🧔' },
+  { slug: 'sidermakeup',   label: 'Sider Makeup',    icon: '👩‍👩‍👧' },
 ]
 
 const IMAGE_SLOTS = 3

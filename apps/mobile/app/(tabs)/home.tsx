@@ -47,6 +47,10 @@ const SERVICES: { id: string; icon: MCIcon; label: string; sub: string; bg: stri
   { id: 'partymakeup',   icon: 'star-shooting',      label: 'Party Makeup',    sub: 'Glam & Glitter',        bg: '#f3e5f5', iconColor: '#6a1b9a' },
   { id: 'straightening', icon: 'auto-fix',           label: 'Straightening',   sub: 'Keratin & Rebond',      bg: '#e8eaf6', iconColor: '#1a237e' },
   { id: 'nailext',       icon: 'diamond-stone',      label: 'Nail Extensions', sub: 'Gel & Acrylic',         bg: '#fce4ec', iconColor: '#c62828' },
+  { id: 'hairspa',       icon: 'spa',                label: 'Hair Spa',        sub: 'Deep Conditioning',     bg: '#e0f2f1', iconColor: '#00695c' },
+  { id: 'groommakeup',   icon: 'face-man-shimmer',   label: 'Groom Makeup',    sub: 'Groom & Men',           bg: '#e3f2fd', iconColor: '#1565c0' },
+  { id: 'beard',         icon: 'mustache',           label: 'Beard',           sub: 'Trim & Grooming',       bg: '#efebe9', iconColor: '#4e342e' },
+  { id: 'sidermakeup',   icon: 'account-group',      label: 'Sider Makeup',    sub: 'Bride Relatives',       bg: '#fce4ec', iconColor: '#d81b60' },
 ]
 
 export default function HomeScreen() {
