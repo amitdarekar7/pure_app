@@ -140,7 +140,7 @@ export default function LoginScreen() {
           {/* Provider portal link */}
           <Link href="/(provider-auth)/login" asChild>
             <Pressable style={styles.providerLink}>
-              <Text style={styles.providerLinkText}>Are you a provider? Sign in to your dashboard →</Text>
+              <Text style={styles.providerLinkText}>Manage your business? Log in to your business account →</Text>
             </Pressable>
           </Link>
 

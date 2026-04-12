@@ -19,15 +19,13 @@ import { useEventStream, type BookingRequestedEvent } from '../../lib/use-event-
 
 const LOGO = require('../../assets/images/logo_pure.png')
 
-const STATUS_FILTERS = ['all', 'pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show'] as const
+const STATUS_FILTERS = ['all', 'pending', 'confirmed', 'completed', 'cancelled'] as const
 
 const STATUS_META: Record<string, { color: string; bg: string; icon: string }> = {
   pending:     { color: '#D97706', bg: '#FFFBEB', icon: '⏳' },
   confirmed:   { color: '#059669', bg: '#ECFDF5', icon: '✅' },
-  in_progress: { color: '#2563EB', bg: '#EFF6FF', icon: '🔄' },
   completed:   { color: '#6B7280', bg: '#F3F4F6', icon: '✓' },
   cancelled:   { color: '#DC2626', bg: '#FEF2F2', icon: '✕' },
-  no_show:     { color: '#9333EA', bg: '#F5F3FF', icon: '👻' },
 }
 
 function fmt(iso: string) {

@@ -2,8 +2,43 @@ import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { AuthProvider } from '../lib/auth-context'
 import { ProviderAuthProvider } from '../lib/provider-auth-context'
+import { useFonts } from 'expo-font'
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'
+import * as SplashScreen from 'expo-splash-screen'
+import { useEffect } from 'react'
+import { Platform, View, ActivityIndicator, StyleSheet } from 'react-native'
+
+SplashScreen.preventAutoHideAsync()
+
+function revealApp() {
+  if (Platform.OS === 'web' && typeof document !== 'undefined') {
+    const root = document.getElementById('root')
+    if (root) root.classList.add('app-ready')
+    document.body.classList.add('app-ready')
+  }
+}
 
 export default function RootLayout() {
+  const [fontsLoaded] = useFonts({
+    ...Ionicons.font,
+    ...MaterialCommunityIcons.font,
+  })
+
+  useEffect(() => {
+    if (fontsLoaded) {
+      SplashScreen.hideAsync()
+      revealApp()
+    }
+  }, [fontsLoaded])
+
+  if (!fontsLoaded) {
+    return (
+      <View style={loadingStyles.container}>
+        <ActivityIndicator size="large" color="#7c6af7" />
+      </View>
+    )
+  }
+
   return (
     <AuthProvider>
       <ProviderAuthProvider>
@@ -27,3 +62,7 @@ export default function RootLayout() {
     </AuthProvider>
   )
 }
+
+const loadingStyles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#f5f5f7', alignItems: 'center', justifyContent: 'center' },
+})

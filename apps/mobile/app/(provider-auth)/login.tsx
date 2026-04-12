@@ -58,7 +58,7 @@ export default function ProviderLoginScreen() {
               <Ionicons name="storefront-outline" size={36} color="#7c6af7" />
             </View>
             <Text style={styles.heading}>Provider Login</Text>
-            <Text style={styles.tagline}>Manage your salon / studio</Text>
+            <Text style={styles.tagline}>Manage your beauty business</Text>
           </View>
 
           {/* Fields */}

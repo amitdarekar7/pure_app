@@ -12,8 +12,9 @@ import {
 import { Link, useRouter } from 'expo-router'
 import { useState } from 'react'
 import { useProviderAuth } from '../../lib/provider-auth-context'
-import { LocationAPI, type City } from '../../lib/api'
+import { LocationAPI, type City, type Area } from '../../lib/api'
 import { useEffect } from 'react'
+import { Ionicons } from '@expo/vector-icons'
 
 export default function ProviderRegisterScreen() {
   const { register } = useProviderAuth()
@@ -25,11 +26,15 @@ export default function ProviderRegisterScreen() {
   const [displayName,  setDisplayName]  = useState('')
   const [providerName, setProviderName] = useState('')
   const [phone,        setPhone]        = useState('')
-  const [address,      setAddress]      = useState('')
   const [cities,       setCities]       = useState<City[]>([])
   const [selectedCity, setSelectedCity] = useState<City | null>(null)
   const [citySearch,   setCitySearch]   = useState('')
   const [showCities,   setShowCities]   = useState(false)
+  const [areas,        setAreas]        = useState<Area[]>([])
+  const [selectedArea, setSelectedArea] = useState<Area | null>(null)
+  const [areaSearch,   setAreaSearch]   = useState('')
+  const [showAreas,    setShowAreas]    = useState(false)
+  const [areasLoading, setAreasLoading] = useState(false)
   const [loading,      setLoading]      = useState(false)
   const [error,        setError]        = useState<string | null>(null)
 
@@ -37,8 +42,22 @@ export default function ProviderRegisterScreen() {
     LocationAPI.cities().then(({ cities: c }) => setCities(c)).catch(() => {})
   }, [])
 
+  useEffect(() => {
+    if (!selectedCity) { setAreas([]); setSelectedArea(null); return }
+    setAreasLoading(true)
+    setSelectedArea(null)
+    LocationAPI.areas(selectedCity.id)
+      .then(({ areas: a }) => setAreas(a))
+      .catch(() => setAreas([]))
+      .finally(() => setAreasLoading(false))
+  }, [selectedCity])
+
   const filteredCities = cities.filter(c =>
     c.name.toLowerCase().includes(citySearch.toLowerCase()),
+  )
+
+  const filteredAreas = areas.filter(a =>
+    a.name.toLowerCase().includes(areaSearch.toLowerCase()),
   )
 
   async function handleRegister() {
@@ -63,7 +82,7 @@ export default function ProviderRegisterScreen() {
         password,
         displayName:  displayName.trim(),
         providerName: providerName.trim(),
-        address:      address.trim() || undefined,
+        address:      selectedArea?.name || undefined,
         cityId:       selectedCity.id,
         phone:        phone.trim() || undefined,
       })
@@ -80,10 +99,20 @@ export default function ProviderRegisterScreen() {
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.card}>
-          <Text style={styles.heading}>Register Your Business</Text>
-          <Text style={styles.sub}>Create a provider account to manage bookings</Text>
+
+          {/* Brand */}
+          <View style={styles.brand}>
+            <View style={styles.iconWrap}>
+              <Ionicons name="storefront-outline" size={36} color="#7c6af7" />
+            </View>
+            <Text style={styles.heading}>Register Your Business</Text>
+            <Text style={styles.tagline}>Create a provider account to manage bookings</Text>
+          </View>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -93,7 +122,7 @@ export default function ProviderRegisterScreen() {
           <TextInput
             style={styles.input}
             placeholder="Your full name"
-            placeholderTextColor="#777"
+            placeholderTextColor="#bbb"
             value={displayName}
             onChangeText={setDisplayName}
           />
@@ -102,19 +131,20 @@ export default function ProviderRegisterScreen() {
           <TextInput
             style={styles.input}
             placeholder="you@example.com"
-            placeholderTextColor="#777"
+            placeholderTextColor="#bbb"
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
+            autoComplete="email"
           />
 
           <Text style={styles.label}>Password *</Text>
           <TextInput
             style={styles.input}
             placeholder="Min 6 characters"
-            placeholderTextColor="#777"
+            placeholderTextColor="#bbb"
             value={password}
             onChangeText={setPassword}
             secureTextEntry
@@ -124,7 +154,7 @@ export default function ProviderRegisterScreen() {
           <TextInput
             style={styles.input}
             placeholder="Re-enter password"
-            placeholderTextColor="#777"
+            placeholderTextColor="#bbb"
             value={confirmPass}
             onChangeText={setConfirmPass}
             secureTextEntry
@@ -136,7 +166,7 @@ export default function ProviderRegisterScreen() {
           <TextInput
             style={styles.input}
             placeholder="e.g. Glamour Studio"
-            placeholderTextColor="#777"
+            placeholderTextColor="#bbb"
             value={providerName}
             onChangeText={setProviderName}
           />
@@ -145,25 +175,16 @@ export default function ProviderRegisterScreen() {
           <TextInput
             style={styles.input}
             placeholder="+91 98765 43210"
-            placeholderTextColor="#777"
+            placeholderTextColor="#bbb"
             value={phone}
             onChangeText={setPhone}
             keyboardType="phone-pad"
           />
 
-          <Text style={styles.label}>Address</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Street / area"
-            placeholderTextColor="#777"
-            value={address}
-            onChangeText={setAddress}
-          />
-
           <Text style={styles.label}>City *</Text>
           <Pressable
             style={[styles.input, styles.selectBox]}
-            onPress={() => setShowCities(!showCities)}
+            onPress={() => { setShowCities(!showCities); setShowAreas(false) }}
           >
             <Text style={selectedCity ? styles.selectText : styles.placeholderText}>
               {selectedCity ? selectedCity.name : 'Select a city'}
@@ -175,7 +196,7 @@ export default function ProviderRegisterScreen() {
               <TextInput
                 style={styles.dropdownSearch}
                 placeholder="Search city…"
-                placeholderTextColor="#777"
+                placeholderTextColor="#bbb"
                 value={citySearch}
                 onChangeText={setCitySearch}
                 autoFocus
@@ -201,6 +222,48 @@ export default function ProviderRegisterScreen() {
             </View>
           )}
 
+          <Text style={styles.label}>Area *</Text>
+          <Pressable
+            style={[styles.input, styles.selectBox, !selectedCity && styles.inputDisabled]}
+            onPress={() => { if (selectedCity) { setShowAreas(!showAreas); setShowCities(false) } }}
+            disabled={!selectedCity}
+          >
+            <Text style={selectedArea ? styles.selectText : styles.placeholderText}>
+              {areasLoading ? 'Loading areas…' : selectedArea ? selectedArea.name : selectedCity ? 'Select an area' : 'Select city first'}
+            </Text>
+          </Pressable>
+
+          {showAreas && (
+            <View style={styles.dropdown}>
+              <TextInput
+                style={styles.dropdownSearch}
+                placeholder="Search area…"
+                placeholderTextColor="#bbb"
+                value={areaSearch}
+                onChangeText={setAreaSearch}
+                autoFocus
+              />
+              <ScrollView style={{ maxHeight: 200 }} keyboardShouldPersistTaps="handled">
+                {filteredAreas.map(a => (
+                  <Pressable
+                    key={a.id}
+                    style={styles.dropdownItem}
+                    onPress={() => {
+                      setSelectedArea(a)
+                      setShowAreas(false)
+                      setAreaSearch('')
+                    }}
+                  >
+                    <Text style={styles.dropdownItemText}>{a.name}{a.pincode ? ` — ${a.pincode}` : ''}</Text>
+                  </Pressable>
+                ))}
+                {filteredAreas.length === 0 && (
+                  <Text style={styles.noResults}>No areas found</Text>
+                )}
+              </ScrollView>
+            </View>
+          )}
+
           <Pressable
             style={[styles.btn, loading && styles.btnDisabled]}
             onPress={handleRegister}
@@ -211,11 +274,30 @@ export default function ProviderRegisterScreen() {
               : <Text style={styles.btnText}>Create Provider Account</Text>}
           </Pressable>
 
-          <Link href="/(provider-auth)/login" asChild>
-            <Pressable style={styles.linkRow}>
-              <Text style={styles.linkText}>Already have an account? Sign in</Text>
+          {/* Divider */}
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          {/* Footer */}
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>Already have an account? </Text>
+            <Link href="/(provider-auth)/login" asChild>
+              <Pressable>
+                <Text style={styles.link}>Sign in</Text>
+              </Pressable>
+            </Link>
+          </View>
+
+          {/* Back to user login */}
+          <Link href="/(auth)/login" asChild>
+            <Pressable style={styles.userLink}>
+              <Text style={styles.userLinkText}>← Back to user login</Text>
             </Pressable>
           </Link>
+
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -223,26 +305,94 @@ export default function ProviderRegisterScreen() {
 }
 
 const styles = StyleSheet.create({
-  root:             { flex: 1, backgroundColor: '#0f0f23' },
-  scroll:           { flexGrow: 1, padding: 24, paddingTop: 48 },
-  card:             { backgroundColor: '#1a1a2e', borderRadius: 16, padding: 24 },
-  heading:          { color: '#fff', fontSize: 24, fontWeight: '700', marginBottom: 4 },
-  sub:              { color: '#aaa', fontSize: 13, marginBottom: 20 },
-  error:            { backgroundColor: '#4a1a2e', color: '#ff7c7c', borderRadius: 8, padding: 10, marginBottom: 14, fontSize: 13 },
-  sectionTitle:     { color: '#7c6af7', fontSize: 13, fontWeight: '700', marginTop: 20, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 },
-  label:            { color: '#ccc', fontSize: 13, marginBottom: 5, marginTop: 10 },
-  input:            { backgroundColor: '#2a2a4a', color: '#fff', borderRadius: 10, padding: 13, fontSize: 15, borderWidth: 1, borderColor: '#3a3a5a' },
+  root:   { flex: 1, backgroundColor: '#f5f5f7' },
+  scroll: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 20, paddingTop: 48 },
+
+  card: {
+    width:            '100%',
+    maxWidth:         420,
+    backgroundColor:  '#ffffff',
+    borderRadius:     20,
+    padding:          28,
+    shadowColor:      '#000',
+    shadowOffset:     { width: 0, height: 4 },
+    shadowOpacity:    0.08,
+    shadowRadius:     16,
+    elevation:        6,
+  },
+
+  brand:     { alignItems: 'center', marginBottom: 24 },
+  iconWrap:  { width: 64, height: 64, borderRadius: 32, backgroundColor: '#f0eeff', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  heading:   { color: '#0f0f23', fontSize: 22, fontWeight: '800', marginBottom: 4, textAlign: 'center' },
+  tagline:   { color: '#999', fontSize: 13, textAlign: 'center' },
+
+  error: { color: '#e53935', fontSize: 13, marginBottom: 10, textAlign: 'center', backgroundColor: '#fef2f2', borderRadius: 8, padding: 10 },
+
+  sectionTitle: {
+    color:            '#7c6af7',
+    fontSize:         12,
+    fontWeight:       '700',
+    marginTop:        20,
+    marginBottom:     4,
+    textTransform:    'uppercase',
+    letterSpacing:    1,
+  },
+
+  label: { color: '#444', fontSize: 13, fontWeight: '700', marginBottom: 6, marginTop: 4 },
+  input: {
+    backgroundColor:   '#f8f8fc',
+    borderWidth:       1,
+    borderColor:       '#ebebf5',
+    borderRadius:      10,
+    paddingHorizontal: 14,
+    paddingVertical:   13,
+    color:             '#0f0f23',
+    fontSize:          15,
+    marginBottom:      10,
+  },
+
   selectBox:        { justifyContent: 'center' },
-  selectText:       { color: '#fff', fontSize: 15 },
-  placeholderText:  { color: '#777', fontSize: 15 },
-  dropdown:         { backgroundColor: '#2a2a4a', borderRadius: 10, marginTop: 4, borderWidth: 1, borderColor: '#3a3a5a', overflow: 'hidden' },
-  dropdownSearch:   { color: '#fff', padding: 10, borderBottomWidth: 1, borderBottomColor: '#3a3a5a', fontSize: 14 },
-  dropdownItem:     { padding: 12, borderBottomWidth: 1, borderBottomColor: '#3a3a5a' },
-  dropdownItemText: { color: '#fff', fontSize: 14 },
-  noResults:        { color: '#777', padding: 12, fontSize: 14 },
-  btn:              { backgroundColor: '#7c6af7', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 28 },
-  btnDisabled:      { opacity: 0.6 },
-  btnText:          { color: '#fff', fontWeight: '700', fontSize: 16 },
-  linkRow:          { alignItems: 'center', marginTop: 16 },
-  linkText:         { color: '#7c6af7', fontSize: 14 },
+  inputDisabled:    { opacity: 0.5 },
+  selectText:       { color: '#0f0f23', fontSize: 15 },
+  placeholderText:  { color: '#bbb', fontSize: 15 },
+
+  dropdown: {
+    backgroundColor: '#ffffff',
+    borderRadius:    10,
+    marginTop:       4,
+    marginBottom:    8,
+    borderWidth:     1,
+    borderColor:     '#ebebf5',
+    overflow:        'hidden',
+    shadowColor:     '#000',
+    shadowOffset:    { width: 0, height: 2 },
+    shadowOpacity:   0.06,
+    shadowRadius:    8,
+    elevation:       4,
+  },
+  dropdownSearch:   { color: '#0f0f23', padding: 10, borderBottomWidth: 1, borderBottomColor: '#ebebf5', fontSize: 14 },
+  dropdownItem:     { padding: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f5' },
+  dropdownItemText: { color: '#0f0f23', fontSize: 14 },
+  noResults:        { color: '#999', padding: 12, fontSize: 14 },
+
+  btn: {
+    backgroundColor: '#0f0f23',
+    borderRadius:    12,
+    paddingVertical: 15,
+    alignItems:      'center',
+    marginTop:       24,
+  },
+  btnDisabled: { opacity: 0.5 },
+  btnText:     { color: '#fff', fontWeight: '800', fontSize: 15, letterSpacing: 0.5 },
+
+  divider:     { flexDirection: 'row', alignItems: 'center', marginVertical: 20, gap: 10 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: '#ebebf5' },
+  dividerText: { color: '#bbb', fontSize: 12 },
+
+  footer:     { flexDirection: 'row', justifyContent: 'center' },
+  footerText: { color: '#999', fontSize: 14 },
+  link:       { color: '#7c6af7', fontSize: 14, fontWeight: '700' },
+
+  userLink:     { alignItems: 'center', marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#ebebf5' },
+  userLinkText: { color: '#7c6af7', fontSize: 13 },
 })
