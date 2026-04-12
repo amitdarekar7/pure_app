@@ -130,6 +130,7 @@ services:
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:29092
       NODE_ENV: development
+      PAYMENT_SERVICE_URL: http://payment-service:3002
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-/tmp/fake-firebase.json}
     depends_on:
       postgres-core:
@@ -169,6 +170,8 @@ services:
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:29092
       RUST_LOG: info
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-rzp_test_ScTCKAa5bMjNUU}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-QXy6WTxOHqOaVSeEXqwyhYLo}
     depends_on:
       postgres-payments:
         condition: service_healthy

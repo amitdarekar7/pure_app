@@ -230,6 +230,8 @@ export async function providerRoutes(app: FastifyInstance) {
         phone:         string | null
         area_name:     string | null
         city_name:     string | null
+        lat:           number | null
+        lng:           number | null
         service_id:    string
         service_title: string
         price_paise:   number
@@ -248,6 +250,8 @@ export async function providerRoutes(app: FastifyInstance) {
            p.phone,
            a.name  AS area_name,
            c.name  AS city_name,
+           p.lat,
+           p.lng,
            ps.id   AS service_id,
            ps.title         AS service_title,
            ps.price_paise,

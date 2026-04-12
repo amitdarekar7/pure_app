@@ -106,6 +106,28 @@ export const BookingsAPI = {
     _auth<{ booking: { id: string; status: string } }>(
       'POST', `${CORE}/v1/bookings/${encodeURIComponent(id)}/complete`, {},
     ),
+  pay: (id: string) =>
+    _auth<{
+      razorpay_order_id: string
+      razorpay_key_id:   string
+      amount_paise:      number
+      currency:          string
+      booking_id:        string
+    }>(
+      'POST', `${CORE}/v1/bookings/${encodeURIComponent(id)}/pay`, {},
+    ),
+  verifyPayment: (id: string, body: {
+    razorpay_order_id:   string
+    razorpay_payment_id: string
+    razorpay_signature:  string
+  }) =>
+    _auth<{ booking: { id: string; payment_status: string; razorpay_payment_id: string } }>(
+      'POST', `${CORE}/v1/bookings/${encodeURIComponent(id)}/verify-payment`, body,
+    ),
+  chooseVenue: (id: string) =>
+    _auth<{ booking: { id: string; payment_mode: string } }>(
+      'POST', `${CORE}/v1/bookings/${encodeURIComponent(id)}/choose-venue`, {},
+    ),
 }
 
 // ─── Provider Portal API (provider-authenticated) ────────────────────────────
@@ -338,6 +360,8 @@ export interface ProviderDetail extends Provider {
   phone:         string | null
   city_name:     string | null
   category_slug: string
+  lat:           number | null
+  lng:           number | null
 }
 
 export interface ProviderServiceItem {
@@ -386,6 +410,7 @@ export interface BookingSummary {
   original_price_paise:  number | null
   discount_pct:          number
   payment_mode:          string
+  payment_status:        string
   checkin_otp:           string | null
   checked_in_at:         string | null
   no_show:               boolean
@@ -417,16 +442,18 @@ export interface ProviderStats {
 }
 
 export interface ProviderBooking {
-  id:            string
-  user_name:     string | null
-  user_email:    string
-  user_phone:    string | null
-  service_title: string
-  scheduled_at:  string
-  status:        string
-  price_paise:   number
-  notes:         string | null
-  created_at:    string
+  id:             string
+  user_name:      string | null
+  user_email:     string
+  user_phone:     string | null
+  service_title:  string
+  scheduled_at:   string
+  status:         string
+  price_paise:    number
+  notes:          string | null
+  created_at:     string
+  payment_mode:   string
+  payment_status: string
 }
 
 export interface AvailabilitySlot {

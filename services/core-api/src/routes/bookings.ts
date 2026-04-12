@@ -177,6 +177,7 @@ export async function bookingRoutes(app: FastifyInstance) {
         original_price_paise: number | null
         discount_pct:        number
         payment_mode:        string
+        payment_status:      string
         checkin_otp:         string | null
         checked_in_at:       string | null
         no_show:             boolean
@@ -191,6 +192,7 @@ export async function bookingRoutes(app: FastifyInstance) {
            b.original_price_paise,
            b.discount_pct,
            b.payment_mode,
+           b.payment_status,
            b.checkin_otp,
            b.checked_in_at,
            b.no_show
@@ -198,7 +200,7 @@ export async function bookingRoutes(app: FastifyInstance) {
          JOIN   providers        p  ON p.id  = b.provider_id
          JOIN   provider_services ps ON ps.id = b.provider_service_id
          WHERE  b.user_id = $1
-         ORDER  BY b.scheduled_at DESC`,
+         ORDER  BY b.created_at DESC`,
         [uRows[0].id],
       )
 
@@ -417,6 +419,238 @@ export async function bookingRoutes(app: FastifyInstance) {
       }
 
       return reply.send({ booking: updated[0] })
+    },
+  )
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // POST /v1/bookings/:id/pay
+  // Creates a Razorpay order for the booking. Returns order_id + key_id
+  // so the frontend can open Razorpay checkout.
+  // ─────────────────────────────────────────────────────────────────────────
+  app.post<{
+    Params: { id: string }
+  }>(
+    '/:id/pay',
+    { preHandler: requireAuth },
+    async (req, reply) => {
+      const { id } = req.params
+
+      if (!/^[0-9a-f-]{36}$/i.test(id)) {
+        return reply.status(400).send({ error: 'invalid booking id' })
+      }
+
+      // Resolve user
+      const { rows: uRows } = await app.db.query<{ id: string }>(
+        `SELECT id FROM users WHERE firebase_uid = $1`,
+        [req.firebaseUid],
+      )
+      if (!uRows[0]) return reply.status(401).send({ error: 'user not found' })
+
+      // Fetch booking
+      const { rows: bRows } = await app.db.query<{
+        id: string; status: string; user_id: string;
+        payment_mode: string; payment_status: string; price_paise: number
+      }>(
+        `SELECT id, status, user_id, payment_mode, payment_status, price_paise
+           FROM bookings WHERE id = $1`,
+        [id],
+      )
+      if (!bRows[0]) return reply.status(404).send({ error: 'booking not found' })
+
+      const bk = bRows[0]
+
+      if (bk.user_id !== uRows[0].id) {
+        return reply.status(403).send({ error: 'not your booking' })
+      }
+      if (bk.payment_mode !== 'prepaid') {
+        return reply.status(409).send({ error: 'only prepaid bookings can be paid online' })
+      }
+      if (bk.status !== 'confirmed') {
+        return reply.status(409).send({ error: 'booking must be confirmed before payment' })
+      }
+      if (bk.payment_status === 'paid') {
+        return reply.status(409).send({ error: 'already paid' })
+      }
+
+      // Call payment-service to create a Razorpay order
+      const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:3002'
+      const rzpResp = await fetch(`${paymentUrl}/v1/razorpay/order`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          booking_id:   bk.id,
+          amount_paise: bk.price_paise,
+          currency:     'INR',
+        }),
+      })
+
+      if (!rzpResp.ok) {
+        const errBody = await rzpResp.text()
+        app.log.error(`Razorpay order creation failed: ${errBody}`)
+        return reply.status(502).send({ error: 'Failed to create payment order' })
+      }
+
+      const rzpData = await rzpResp.json() as {
+        razorpay_order_id: string
+        razorpay_key_id:   string
+        amount_paise:      number
+        currency:          string
+      }
+
+      return reply.send({
+        razorpay_order_id: rzpData.razorpay_order_id,
+        razorpay_key_id:   rzpData.razorpay_key_id,
+        amount_paise:      rzpData.amount_paise,
+        currency:          rzpData.currency,
+        booking_id:        bk.id,
+      })
+    },
+  )
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // POST /v1/bookings/:id/verify-payment
+  // After Razorpay checkout completes, frontend sends the signature triplet.
+  // We verify via payment-service and mark booking as paid if valid.
+  // ─────────────────────────────────────────────────────────────────────────
+  app.post<{
+    Params: { id: string }
+    Body: {
+      razorpay_order_id:   string
+      razorpay_payment_id: string
+      razorpay_signature:  string
+    }
+  }>(
+    '/:id/verify-payment',
+    { preHandler: requireAuth },
+    async (req, reply) => {
+      const { id } = req.params
+      const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body
+
+      if (!/^[0-9a-f-]{36}$/i.test(id)) {
+        return reply.status(400).send({ error: 'invalid booking id' })
+      }
+      if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+        return reply.status(400).send({ error: 'missing razorpay fields' })
+      }
+
+      // Resolve user
+      const { rows: uRows } = await app.db.query<{ id: string }>(
+        `SELECT id FROM users WHERE firebase_uid = $1`,
+        [req.firebaseUid],
+      )
+      if (!uRows[0]) return reply.status(401).send({ error: 'user not found' })
+
+      // Fetch booking
+      const { rows: bRows } = await app.db.query<{
+        id: string; user_id: string; payment_status: string
+      }>(
+        `SELECT id, user_id, payment_status FROM bookings WHERE id = $1`,
+        [id],
+      )
+      if (!bRows[0]) return reply.status(404).send({ error: 'booking not found' })
+
+      if (bRows[0].user_id !== uRows[0].id) {
+        return reply.status(403).send({ error: 'not your booking' })
+      }
+      if (bRows[0].payment_status === 'paid') {
+        return reply.status(409).send({ error: 'already paid' })
+      }
+
+      // Verify signature with payment-service
+      const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:3002'
+      const verifyResp = await fetch(`${paymentUrl}/v1/razorpay/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          razorpay_order_id,
+          razorpay_payment_id,
+          razorpay_signature,
+          booking_id: id,
+        }),
+      })
+
+      if (!verifyResp.ok) {
+        const errBody = await verifyResp.text()
+        app.log.error(`Razorpay verification failed: ${errBody}`)
+        return reply.status(400).send({ error: 'Payment verification failed — possible tampering' })
+      }
+
+      // Mark booking as paid + store Razorpay payment ID
+      const { rows: updated } = await app.db.query<{ id: string; payment_status: string }>(
+        `UPDATE bookings
+            SET payment_status = 'paid',
+                razorpay_payment_id = $2,
+                updated_at = NOW()
+          WHERE id = $1
+          RETURNING id, payment_status`,
+        [id, razorpay_payment_id],
+      )
+
+      return reply.send({
+        booking: {
+          id: updated[0].id,
+          payment_status: updated[0].payment_status,
+          razorpay_payment_id,
+        },
+      })
+    },
+  )
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // POST /v1/bookings/:id/choose-venue
+  // User chooses to pay at venue instead of online (after provider confirms).
+  // ─────────────────────────────────────────────────────────────────────────
+  app.post<{
+    Params: { id: string }
+  }>(
+    '/:id/choose-venue',
+    { preHandler: requireAuth },
+    async (req, reply) => {
+      const { id } = req.params
+
+      if (!/^[0-9a-f-]{36}$/i.test(id)) {
+        return reply.status(400).send({ error: 'invalid booking id' })
+      }
+
+      const { rows: uRows } = await app.db.query<{ id: string }>(
+        `SELECT id FROM users WHERE firebase_uid = $1`,
+        [req.firebaseUid],
+      )
+      if (!uRows[0]) return reply.status(401).send({ error: 'user not found' })
+
+      const { rows: bRows } = await app.db.query<{
+        id: string; status: string; user_id: string; payment_status: string
+      }>(
+        `SELECT id, status, user_id, payment_status FROM bookings WHERE id = $1`,
+        [id],
+      )
+      if (!bRows[0]) return reply.status(404).send({ error: 'booking not found' })
+
+      const bk = bRows[0]
+
+      if (bk.user_id !== uRows[0].id) {
+        return reply.status(403).send({ error: 'not your booking' })
+      }
+      if (bk.status !== 'confirmed') {
+        return reply.status(409).send({ error: 'booking must be confirmed first' })
+      }
+      if (bk.payment_status === 'paid') {
+        return reply.status(409).send({ error: 'already paid online' })
+      }
+
+      // Switch to pay_at_venue, zero out commission
+      await app.db.query(
+        `UPDATE bookings
+            SET payment_mode = 'pay_at_venue',
+                commission_pct = 0,
+                commission_paise = 0,
+                provider_paise = price_paise,
+                updated_at = NOW()
+          WHERE id = $1`,
+        [id],
+      )
+
+      return reply.send({ booking: { id, payment_mode: 'pay_at_venue' } })
     },
   )
 }

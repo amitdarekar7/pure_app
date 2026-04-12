@@ -142,10 +142,12 @@ export default function PaymentsScreen() {
     >
       {/* ── Header ── */}
       <View style={styles.headerBar}>
-        <Pressable onPress={() => router.navigate('/(tabs)/home')} hitSlop={8}>
-          <Image source={LOGO} style={styles.logoImage} resizeMode="contain" />
-        </Pressable>
-        <Text style={styles.pageTitle}>Pay</Text>
+        <View style={[styles.headerInner, { maxWidth: maxW }]}>
+          <Pressable onPress={() => router.navigate('/(tabs)/home')} hitSlop={8}>
+            <Image source={LOGO} style={styles.logoImage} resizeMode="contain" />
+          </Pressable>
+          <Text style={styles.pageTitle}>Pay</Text>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
@@ -313,14 +315,18 @@ const styles = StyleSheet.create({
 
   headerBar: {
     backgroundColor:   '#fff',
-    paddingHorizontal: 20,
     paddingTop:        Platform.OS === 'ios' ? 52 : Platform.OS === 'android' ? 28 : 16,
     paddingBottom:     14,
+    alignItems:        'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f8',
+  },
+  headerInner: {
     flexDirection:     'row',
     alignItems:        'center',
     justifyContent:    'space-between',
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f8',
+    width:             '100%',
+    paddingHorizontal: 20,
   },
   logoImage: { width: 130, height: 44 },
   pageTitle: { fontSize: 16, fontWeight: '800', color: '#0f0f23' },

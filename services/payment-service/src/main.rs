@@ -49,6 +49,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/payments/intent",  post(handlers::payment::create_intent))
         .route("/v1/payments/confirm", post(handlers::payment::confirm_payment))
         .route("/v1/payments/refund",  post(handlers::payment::create_refund))
+        .route("/v1/razorpay/order",   post(handlers::razorpay::create_order))
+        .route("/v1/razorpay/verify",  post(handlers::razorpay::verify_payment))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

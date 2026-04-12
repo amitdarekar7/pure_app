@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ledger_entries\n             (id, wallet_id, payment_intent_id, entry_type, amount_cents,\n              currency, balance_after_cents, description)\n           SELECT $1, w.id, $2, 'debit', $3, $4,\n                  (w.balance_cents - $3), $6\n           FROM wallets w\n           WHERE w.user_id = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Bpchar",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e137910c83ab38426161d60a6be78568fa83e542597a9f53fd635b5d5224be34"
+}

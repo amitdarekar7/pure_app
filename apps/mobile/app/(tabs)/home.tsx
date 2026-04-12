@@ -917,20 +917,56 @@ export default function HomeScreen() {
                 const meta = BOOKING_STATUS_META[b.status] ?? BOOKING_STATUS_META._default
                 const d    = new Date(b.scheduled_at)
                 const dateStr = `${DAYS_S[d.getDay()]}, ${d.getDate()} ${MONTHS_S[d.getMonth()]} · ${d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`
+                const needsPay = b.status === 'confirmed' && b.payment_mode === 'prepaid' && b.payment_status === 'unpaid'
+                const isPaid   = b.payment_mode === 'prepaid' && b.payment_status === 'paid'
+                const isVenue  = b.payment_mode === 'pay_at_venue'
                 return (
                   <View key={b.id} style={styles.bwCard}>
-                    <View style={styles.bwCardLeft}>
-                      <Text style={styles.bwCardProvider} numberOfLines={1}>{b.provider_name}</Text>
-                      <Text style={styles.bwCardService} numberOfLines={1}>{b.service_title}</Text>
-                      <Text style={styles.bwCardDate}>{dateStr}</Text>
-                    </View>
-                    <View style={styles.bwCardRight}>
-                      <View style={[styles.bwBadge, { backgroundColor: meta.bg }]}>
-                        <Ionicons name={meta.icon as any} size={11} color={meta.color} />
-                        <Text style={[styles.bwBadgeText, { color: meta.color }]}>{meta.label}</Text>
+                    <View style={styles.bwCardTopRow}>
+                      <View style={styles.bwCardLeft}>
+                        <Text style={styles.bwCardProvider} numberOfLines={1}>{b.provider_name}</Text>
+                        <Text style={styles.bwCardService} numberOfLines={1}>{b.service_title}</Text>
+                        <Text style={styles.bwCardDate}>{dateStr}</Text>
                       </View>
-                      <Text style={styles.bwCardPrice}>₹{Math.round(b.price_paise / 100)}</Text>
+                      <View style={styles.bwCardRight}>
+                        <View style={[styles.bwBadge, { backgroundColor: meta.bg }]}>
+                          <Ionicons name={meta.icon as any} size={11} color={meta.color} />
+                          <Text style={[styles.bwBadgeText, { color: meta.color }]}>{meta.label}</Text>
+                        </View>
+                        <Text style={styles.bwCardPrice}>₹{Math.round(b.price_paise / 100)}</Text>
+                      </View>
                     </View>
+                    {/* Confirmed + unpaid: show two clear options */}
+                    {needsPay && (
+                      <View style={styles.bwPayChoiceRow}>
+                        <Pressable style={styles.bwPayOnlineBtn} onPress={() => router.push('/(tabs)/bookings')}>
+                          <Ionicons name="phone-portrait-outline" size={13} color="#fff" />
+                          <Text style={styles.bwPayOnlineText}>Pay Online</Text>
+                        </Pressable>
+                        <Pressable style={styles.bwPayVenueBtn} onPress={() => router.push('/(tabs)/bookings')}>
+                          <Ionicons name="storefront-outline" size={13} color="#E8590C" />
+                          <Text style={styles.bwPayVenueText}>Pay at Venue</Text>
+                        </Pressable>
+                      </View>
+                    )}
+                    {isPaid && (
+                      <View style={[styles.bwPayStrip, { backgroundColor: '#ecfdf5' }]}>
+                        <Ionicons name="checkmark-done" size={13} color="#065f46" />
+                        <Text style={[styles.bwPayStripText, { color: '#065f46' }]}>Paid — see you at the salon</Text>
+                      </View>
+                    )}
+                    {b.status === 'confirmed' && isVenue && (
+                      <View style={[styles.bwPayStrip, { backgroundColor: '#ecfdf5' }]}>
+                        <Ionicons name="wallet-outline" size={13} color="#065f46" />
+                        <Text style={[styles.bwPayStripText, { color: '#065f46' }]}>Pay at venue when you arrive</Text>
+                      </View>
+                    )}
+                    {b.status === 'pending' && (
+                      <View style={[styles.bwPayStrip, { backgroundColor: '#fef9ee' }]}>
+                        <Ionicons name="hourglass-outline" size={13} color="#92400e" />
+                        <Text style={[styles.bwPayStripText, { color: '#92400e' }]}>Awaiting salon confirmation</Text>
+                      </View>
+                    )}
                   </View>
                 )
               })
@@ -1440,13 +1476,15 @@ const styles = StyleSheet.create({
   bwBookNowText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 
   bwCard: {
+    paddingVertical: 10,
+    borderTopWidth:  1,
+    borderTopColor:  '#f2f2f8',
+  },
+  bwCardTopRow: {
     flexDirection:   'row',
     alignItems:      'flex-start',
     justifyContent:  'space-between',
     gap:             10,
-    paddingTop:       8,
-    borderTopWidth:  1,
-    borderTopColor:  '#f2f2f8',
   },
   bwCardLeft:    { flex: 1 },
   bwCardRight:   { alignItems: 'flex-end', gap: 4 },
@@ -1454,6 +1492,48 @@ const styles = StyleSheet.create({
   bwCardService:  { fontSize: 12, color: '#6b7280', marginTop: 1 },
   bwCardDate:     { fontSize: 11, color: '#9ca3af', marginTop: 3 },
   bwCardPrice:    { fontSize: 13, fontWeight: '700', color: '#7c6af7' },
+
+  bwPayChoiceRow: {
+    flexDirection:  'row',
+    gap:            8,
+    marginTop:      8,
+  },
+  bwPayOnlineBtn: {
+    flex:              1,
+    flexDirection:     'row',
+    alignItems:        'center',
+    justifyContent:    'center',
+    gap:               5,
+    backgroundColor:   '#E8590C',
+    borderRadius:      8,
+    paddingVertical:   7,
+  },
+  bwPayOnlineText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  bwPayVenueBtn: {
+    flex:              1,
+    flexDirection:     'row',
+    alignItems:        'center',
+    justifyContent:    'center',
+    gap:               5,
+    backgroundColor:   '#fff',
+    borderRadius:      8,
+    paddingVertical:   7,
+    borderWidth:       1.5,
+    borderColor:       '#E8590C',
+  },
+  bwPayVenueText: { color: '#E8590C', fontSize: 11, fontWeight: '700' },
+
+  bwPayStrip: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               6,
+    marginTop:         8,
+    paddingVertical:   6,
+    paddingHorizontal: 10,
+    borderRadius:      8,
+    backgroundColor:   '#fff7ed',
+  },
+  bwPayStripText: { fontSize: 11, color: '#E8590C', flex: 1, fontWeight: '600' },
 
   bwBadge: {
     flexDirection:     'row',

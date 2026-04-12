@@ -344,11 +344,13 @@ export default function ProviderBookingsScreen() {
                       </View>
                     ) : null}
 
-                    {/* Payment mode */}
+                    {/* Payment mode + status */}
                     {b.payment_mode && (
                       <View style={styles.payModeBadge}>
                         <Text style={styles.payModeText}>
-                          {b.payment_mode === 'prepaid' ? '📱 Paid via App' : '💳 Pay at Venue'}
+                          {b.payment_mode === 'prepaid'
+                            ? (b.payment_status === 'paid' ? '✅ Paid Online' : '📱 Online · Awaiting Payment')
+                            : '💳 Pay at Venue'}
                         </Text>
                       </View>
                     )}

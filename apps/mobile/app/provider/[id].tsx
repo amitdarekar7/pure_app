@@ -138,7 +138,7 @@ export default function ProviderDetailPage() {
   const [booked, setBooked]       = useState(false)
   const [bookedISO, setBookedISO] = useState<string | null>(null)
   const [bookedOtp, setBookedOtp] = useState<string | null>(null)
-  const [paymentMode, setPaymentMode] = useState<'prepaid' | 'pay_at_venue'>('prepaid')
+  // payment mode chosen after provider confirms (on bookings screen)
 
   // ── lightbox state ──
   const [lightboxVisible, setLightboxVisible] = useState(false)
@@ -241,7 +241,7 @@ export default function ProviderDetailPage() {
         providerServiceId: selectedService.id,
         scheduledAt: iso,
         notes: notes.trim() || undefined,
-        paymentMode,
+        paymentMode: 'prepaid',
       })
       setBookedISO(iso)
       setBookedOtp(bk.checkin_otp ?? null)
@@ -251,7 +251,7 @@ export default function ProviderDetailPage() {
     } finally {
       setBooking(false)
     }
-  }, [selectedService, selectedSlot, selectedDate, notes, paymentMode, isSignedIn])
+  }, [selectedService, selectedSlot, selectedDate, notes, isSignedIn])
 
   const canBook = !!selectedSlot && !!selectedService
 
@@ -527,29 +527,6 @@ export default function ProviderDetailPage() {
           <View style={styles.section}>
             <Text style={styles.sectionHeading}>Book Appointment</Text>
 
-            {/* ── Payment mode ── */}
-            <Text style={styles.subHeading}>Payment method</Text>
-            <View style={styles.payModeOptions}>
-              <Pressable
-                style={[styles.payModeOption, paymentMode === 'prepaid' && styles.payModeSelected]}
-                onPress={() => setPaymentMode('prepaid')}
-              >
-                <Text style={styles.payModeIcon}>📱</Text>
-                <Text style={[styles.payModeLabel, paymentMode === 'prepaid' && styles.payModeLabelSel]}>
-                  Pay via App
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[styles.payModeOption, paymentMode === 'pay_at_venue' && styles.payModeSelected]}
-                onPress={() => setPaymentMode('pay_at_venue')}
-              >
-                <Text style={styles.payModeIcon}>💳</Text>
-                <Text style={[styles.payModeLabel, paymentMode === 'pay_at_venue' && styles.payModeLabelSel]}>
-                  Pay at Venue
-                </Text>
-              </Pressable>
-            </View>
-
             {/* ── Calendar ── */}
             <View style={styles.calendarCard}>
               <View style={styles.calendarHeader}>
@@ -660,6 +637,39 @@ export default function ProviderDetailPage() {
          ════════════════════════════════════════════════════════════════════ */}
         <View style={styles.section}>
           <Text style={styles.sectionHeading}>Location</Text>
+
+          {/* Embedded map — tapping opens Google Maps */}
+          {provider.lat && provider.lng ? (
+            <Pressable
+              onPress={() => {
+                const url = Platform.select({
+                  ios: `maps://app?daddr=${provider.lat},${provider.lng}`,
+                  android: `google.navigation:q=${provider.lat},${provider.lng}`,
+                  default: `https://www.google.com/maps/search/?api=1&query=${provider.lat},${provider.lng}`,
+                })
+                Linking.openURL(url)
+              }}
+              style={styles.mapContainer}
+            >
+              {Platform.OS === 'web' ? (
+                <iframe
+                  src={`https://www.openstreetmap.org/export/embed.html?bbox=${Number(provider.lng) - 0.006},${Number(provider.lat) - 0.004},${Number(provider.lng) + 0.006},${Number(provider.lat) + 0.004}&layer=mapnik&marker=${provider.lat},${provider.lng}`}
+                  style={{ width: '100%', height: 220, border: 'none', borderRadius: 12, pointerEvents: 'none' } as any}
+                />
+              ) : (
+                <Image
+                  source={{ uri: `https://staticmap.openstreetmap.de/staticmap.php?center=${provider.lat},${provider.lng}&zoom=15&size=600x300&maptype=mapnik&markers=${provider.lat},${provider.lng},red-pushpin` }}
+                  style={styles.mapImage}
+                  resizeMode="cover"
+                />
+              )}
+              <View style={styles.mapOverlayBadge}>
+                <Text style={styles.mapOverlayText}>Open in Google Maps ›</Text>
+              </View>
+            </Pressable>
+          ) : null}
+
+          {/* Address + distance */}
           {provider.address && (
             <View style={styles.locationRow}>
               <Text style={styles.locationPin}>📍</Text>
@@ -1078,6 +1088,7 @@ const styles = StyleSheet.create({
   payModeIcon: { fontSize: 20 },
   payModeLabel: { fontSize: 12, fontWeight: '700', color: GREY },
   payModeLabelSel: { color: ORANGE },
+  payModeHint: { fontSize: 10, color: '#999', marginTop: 2 },
 
   calendarCard: {
     backgroundColor: '#FFF9F3',
@@ -1236,6 +1247,32 @@ const styles = StyleSheet.create({
   photoCount: { fontSize: 14, fontWeight: '600', color: GREY },
 
   // ── 7. location ──
+  mapContainer: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 12,
+    backgroundColor: '#E8E8E8',
+    position: 'relative',
+  },
+  mapImage: {
+    width: '100%',
+    height: 220,
+    borderRadius: 12,
+  },
+  mapOverlayBadge: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  mapOverlayText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   locationRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',

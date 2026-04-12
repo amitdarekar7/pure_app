@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO payment_intents\n             (id, user_id, amount_cents, currency, status, idempotency_key, metadata,\n              commission_cents, provider_cents, provider_id, intent_type)\n           VALUES ($1, $2, $3, $4, 'pending', $5, '{}'::jsonb, $6, $7, $8, $9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Bpchar",
+        "Text",
+        "Int8",
+        "Int8",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9d8ddfd965bb28dec44ffa4049024a528d2834cc84ca4d9aab533a9eff72c8cc"
+}

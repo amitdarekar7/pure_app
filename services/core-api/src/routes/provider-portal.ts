@@ -289,16 +289,18 @@ export async function providerPortalRoutes(app: FastifyInstance) {
       const filterStatus = status && allowedStatuses.includes(status) ? status : null
 
       const { rows } = await app.db.query<{
-        id:            string
-        user_name:     string | null
-        user_email:    string
-        user_phone:    string | null
-        service_title: string
-        scheduled_at:  string
-        status:        string
-        price_paise:   number
-        notes:         string | null
-        created_at:    string
+        id:             string
+        user_name:      string | null
+        user_email:     string
+        user_phone:     string | null
+        service_title:  string
+        scheduled_at:   string
+        status:         string
+        price_paise:    number
+        notes:          string | null
+        created_at:     string
+        payment_mode:   string
+        payment_status: string
       }>(
         `SELECT
            b.id,
@@ -310,7 +312,9 @@ export async function providerPortalRoutes(app: FastifyInstance) {
            b.status,
            b.price_paise,
            b.notes,
-           b.created_at
+           b.created_at,
+           b.payment_mode,
+           b.payment_status
          FROM bookings b
          JOIN provider_services ps ON ps.id = b.provider_service_id
          JOIN users             u  ON u.id  = b.user_id

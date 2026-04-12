@@ -243,7 +243,7 @@ pub async fn confirm_payment(
         "amount_cents":      row.amount_cents,
         "commission_cents":  row.commission_cents,
         "provider_cents":    row.provider_cents,
-        "provider_id":       row.provider_id.map(|id| id.to_string()),
+        "provider_id":       row.provider_id.map(|id: Uuid| id.to_string()),
         "intent_type":       &row.intent_type,
         "currency":          &row.currency,
         "processor_ref":     &processor_ref,

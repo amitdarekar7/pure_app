@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ledger_entries\n                 (id, wallet_id, payment_intent_id, entry_type, amount_cents,\n                  currency, balance_after_cents, description)\n               VALUES ($1, $2, $3, 'credit', $4, $5, 0, $6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Bpchar",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0bde1acea2b646325d0b3772961c01520d55da4a7d1735564fda29d8eebc8047"
+}
