@@ -314,6 +314,17 @@ export default function HomeScreen() {
     }
   }
 
+  const firstName = user?.display_name
+    ? user.display_name.split(' ')[0]
+    : user ? user.email.split('@')[0] : ''
+
+  const greeting = (() => {
+    const h = new Date().getHours()
+    if (h < 12) return 'Good morning'
+    if (h < 17) return 'Good afternoon'
+    return 'Good evening'
+  })()
+
   if (authLoading) {
     return (
       <View style={{ flex: 1, backgroundColor: '#f8f8f8', alignItems: 'center', justifyContent: 'center' }}>
@@ -335,48 +346,72 @@ export default function HomeScreen() {
       <View style={styles.card}>
         <View style={{ maxWidth: maxW, width: '100%', alignSelf: 'center' }}>
 
-        {/* ── Header ───────────────────────────────────────────── */}
-        <View style={styles.header}>
-          <Pressable
-            onPress={() => {
-              clearGlobalSearch()
-              setSearched(false)
-              setProviders([])
-              closeAll()
-              scrollRef.current?.scrollTo({ y: 0, animated: true })
-            }}
-            hitSlop={8}
-          >
-            <Image source={LOGO} style={styles.logoImage} resizeMode="contain" />
-          </Pressable>
-
-          {user ? (
+        {/* ── Hero Header (matches provider dashboard) ─────── */}
+        <View style={styles.heroCard}>
+          {/* Top bar: logo + small avatar */}
+          <View style={styles.heroTop}>
             <Pressable
-              onPress={() => router.push('/(tabs)/profile')}
-              style={styles.avatarRow}
+              onPress={() => {
+                clearGlobalSearch()
+                setSearched(false)
+                setProviders([])
+                closeAll()
+                scrollRef.current?.scrollTo({ y: 0, animated: true })
+              }}
+              hitSlop={8}
             >
-              <View style={styles.avatarCircle}>
-                {user.avatar_url
-                  ? <Image source={{ uri: user.avatar_url }} style={styles.avatarCircleImage} />
-                  : <Text style={styles.avatarLetter}>
-                      {(user.display_name ?? user.email)[0].toUpperCase()}
-                    </Text>}
-              </View>
-              <View>
-                <Text style={styles.avatarName} numberOfLines={1}>
-                  {user.display_name
-                    ? user.display_name.split(' ')[0]
-                    : user.email.split('@')[0]}
-                </Text>
-                <Text style={styles.avatarSub}>View Profile</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={14} color="#ccc" />
+              <Image source={LOGO} style={styles.logoImg} resizeMode="contain" />
             </Pressable>
+
+            {user ? (
+              <Pressable style={styles.heroRight} onPress={() => router.push('/(tabs)/profile')}>
+                {user.avatar_url ? (
+                  <Image source={{ uri: user.avatar_url }} style={styles.avatarImgSm} />
+                ) : (
+                  <View style={styles.avatarCircleSm}>
+                    <Text style={styles.avatarLetterSm}>
+                      {firstName[0]?.toUpperCase() ?? 'U'}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+            ) : (
+              <Pressable onPress={() => router.push('/(auth)/login')} style={styles.loginBtn}>
+                <Ionicons name="person-outline" size={13} color="#7c6af7" />
+                <Text style={styles.loginBtnText}>Login</Text>
+              </Pressable>
+            )}
+          </View>
+
+          {/* Greeting row */}
+          {user ? (
+            <>
+              <View style={styles.greetingRow}>
+                {user.avatar_url ? (
+                  <Image source={{ uri: user.avatar_url }} style={styles.avatarImg} />
+                ) : (
+                  <View style={styles.avatarCircle}>
+                    <Text style={styles.avatarLetter}>
+                      {firstName[0]?.toUpperCase() ?? 'U'}
+                    </Text>
+                  </View>
+                )}
+                <View style={styles.greetingInfo}>
+                  <Text style={styles.greetingText}>{greeting},</Text>
+                  <Text style={styles.greetingName}>{firstName} 👋</Text>
+                </View>
+              </View>
+              {user.address ? (
+                <Text style={styles.addressText}>📍 {user.address}</Text>
+              ) : null}
+            </>
           ) : (
-            <Pressable onPress={() => router.push('/(auth)/login')} style={styles.loginBtn}>
-              <Ionicons name="person-outline" size={13} color="#7c6af7" />
-              <Text style={styles.loginBtnText}>Login</Text>
-            </Pressable>
+            <View style={styles.greetingRow}>
+              <View style={styles.greetingInfo}>
+                <Text style={styles.greetingText}>{greeting},</Text>
+                <Text style={styles.greetingName}>Welcome to Pure 👋</Text>
+              </View>
+            </View>
           )}
         </View>
 
@@ -1169,39 +1204,53 @@ const styles = StyleSheet.create({
     elevation:       6,
   },
 
-  // ── Header ────────────────────────────────────────────────────────
-  header: {
+  // ── Hero header (matches provider dashboard) ───────────────────────
+  heroCard: {
+    backgroundColor: '#fff',
+    borderRadius:    20,
+    padding:         20,
+    marginBottom:    16,
+    shadowColor:     '#000',
+    shadowOffset:    { width: 0, height: 2 },
+    shadowOpacity:   0.06,
+    shadowRadius:    12,
+    elevation:       3,
+    borderWidth:     1,
+    borderColor:     '#F3F4F6',
+  },
+  heroTop: {
     flexDirection:  'row',
-    alignItems:     'center',
     justifyContent: 'space-between',
+    alignItems:     'center',
     marginBottom:   20,
   },
-  logoImage: { width: 160, height: 56 },
+  heroRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  logoImg: { width: 80, height: 30 },
+  avatarCircleSm: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: '#E8590C', alignItems: 'center', justifyContent: 'center',
+  },
+  avatarLetterSm: { color: '#fff', fontWeight: '900', fontSize: 14 },
+  avatarImgSm: { width: 34, height: 34, borderRadius: 17 },
 
-  avatarRow: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    gap:             8,
-    backgroundColor: '#f8f8fc',
-    borderRadius:    22,
-    paddingVertical:  6,
-    paddingLeft:      6,
-    paddingRight:    12,
-    maxWidth:        160,
+  greetingRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           14,
+    marginBottom:  8,
   },
   avatarCircle: {
-    width:           36,
-    height:          36,
-    borderRadius:    18,
-    backgroundColor: '#0f0f23',
-    alignItems:      'center',
-    justifyContent:  'center',
-    flexShrink:      0,
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: '#E8590C', alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#E8590C', shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3, shadowRadius: 6, elevation: 3,
   },
-  avatarLetter: { color: '#7c6af7', fontWeight: '900', fontSize: 15 },
-  avatarCircleImage: { width: 36, height: 36, borderRadius: 18 },
-  avatarName:   { color: '#0f0f23', fontWeight: '800', fontSize: 13, maxWidth: 80 },
-  avatarSub:    { color: '#aaa',    fontSize: 10, marginTop: 1 },
+  avatarLetter: { color: '#fff', fontWeight: '900', fontSize: 20 },
+  avatarImg: { width: 48, height: 48, borderRadius: 24 },
+  greetingInfo: {},
+  greetingText: { fontSize: 13, color: '#6B7280', fontWeight: '500' },
+  greetingName: { fontSize: 22, fontWeight: '900', color: '#1B1B1B', marginTop: 2 },
+  addressText:  { fontSize: 12, color: '#6B7280', marginTop: 6 },
 
   loginBtn: {
     flexDirection:     'row',
