@@ -209,6 +209,34 @@ export const ProviderPortalAPI = {
       `${CORE}/v1/provider/me`,
       p,
     ),
+
+  // ─── Subscription ───
+  subscription: () =>
+    _auth<{ subscription: SubscriptionStatus }>('GET', `${CORE}/v1/provider/subscription`),
+
+  subscriptionPurchase: (autoRenew: boolean) =>
+    _auth<{
+      subscription_id: string
+      razorpay_order_id: string
+      razorpay_key_id: string
+      amount_paise: number
+      currency: string
+    }>('POST', `${CORE}/v1/provider/subscription/purchase`, { autoRenew }),
+
+  subscriptionVerify: (p: {
+    subscription_id: string
+    razorpay_order_id: string
+    razorpay_payment_id: string
+    razorpay_signature: string
+  }) =>
+    _auth<{ ok: boolean; subscription: any }>(
+      'POST', `${CORE}/v1/provider/subscription/verify`, p,
+    ),
+
+  subscriptionAutoRenew: (autoRenew: boolean) =>
+    _auth<{ ok: boolean }>(
+      'PATCH', `${CORE}/v1/provider/subscription/auto-renew`, { autoRenew },
+    ),
 }
 
 // ─── Promotions API ───────────────────────────────────────────────────────────
@@ -253,6 +281,22 @@ export interface User {
   timezone:     string | null
   status:       string
   created_at:   string
+}
+
+export interface SubscriptionStatus {
+  subscriptionRequired: boolean
+  hasActiveSubscription: boolean
+  graceUntil: string | null
+  inGracePeriod: boolean
+  isLapsed: boolean
+  activeSubscription: {
+    id: string
+    plan: string
+    starts_at: string
+    expires_at: string
+    auto_renew: boolean
+  } | null
+  freeDaysRemaining: number
 }
 
 export interface UpdatePayload {

@@ -159,10 +159,18 @@ function ProviderTabs() {
         }}
       />
       <Tabs.Screen
+        name="subscription"
+        options={{
+          title:       'Subscription',
+          tabBarLabel: 'Subscribe',
+          tabBarIcon:  ({ color }) => <TabIcon name="card-outline" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
           title:       'Profile',
-          href:        null,
+          tabBarIcon:  ({ color }) => <TabIcon name="person-outline" color={color} />,
         }}
       />
     </Tabs>

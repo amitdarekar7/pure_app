@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth'
 import { publish } from '../kafka/producer'
 import { TOPICS } from '../kafka/topics'
 import { indexProviderService } from '../search-index'
+import { getSubscriptionStatus, QUARTERLY_PAISE, QUARTERLY_DAYS } from '../subscription'
 
 /**
  * Provider Portal Routes — /v1/provider/*
@@ -828,4 +829,135 @@ export async function providerPortalRoutes(app: FastifyInstance) {
       return reply.status(201).send({ service: rows[0] })
     },
   )
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ── SUBSCRIPTION ROUTES ───────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** GET /v1/provider/subscription — current subscription status */
+  app.get('/subscription', async (req, reply) => {
+    const ctx = await requireProviderAuth(app, req, reply)
+    if (!ctx) return
+    const subscription = await getSubscriptionStatus(app.db, ctx.providerId)
+    return { subscription }
+  })
+
+  /** POST /v1/provider/subscription/purchase — create Razorpay order */
+  app.post('/subscription/purchase', async (req, reply) => {
+    const ctx = await requireProviderAuth(app, req, reply)
+    if (!ctx) return
+
+    const { autoRenew } = (req.body as any) ?? {}
+
+    // Create a pending subscription row
+    const subId = randomUUID()
+    const pendingExpiry = new Date(Date.now() + 30 * 60 * 1000).toISOString() // placeholder, updated on verify
+    await app.db.query(
+      `INSERT INTO provider_subscriptions (id, provider_id, plan, status, auto_renew, starts_at, expires_at)
+       VALUES ($1, $2, 'quarterly', 'pending', $3, NOW(), $4)`,
+      [subId, ctx.providerId, autoRenew ?? false, pendingExpiry],
+    )
+
+    // Create Razorpay order via payment-service
+    const PAYMENT = process.env.PAYMENT_SERVICE_URL || 'http://payment-service:3002'
+    const receipt = `sub_${ctx.providerId.slice(0, 8)}_${Date.now()}`
+
+    const rzpRes = await fetch(`${PAYMENT}/v1/razorpay/order`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        booking_id: receipt,
+        amount_paise: QUARTERLY_PAISE,
+        currency: 'INR',
+      }),
+    })
+
+    if (!rzpRes.ok) {
+      const errText = await rzpRes.text()
+      app.log.error({ errText }, 'Payment service error')
+      return reply.status(502).send({ error: 'Payment service error' })
+    }
+
+    const rzpOrder = (await rzpRes.json()) as { razorpay_order_id: string; razorpay_key_id: string }
+
+    return {
+      subscription_id: subId,
+      razorpay_order_id: rzpOrder.razorpay_order_id,
+      razorpay_key_id: rzpOrder.razorpay_key_id,
+      amount_paise: QUARTERLY_PAISE,
+      currency: 'INR',
+    }
+  })
+
+  /** POST /v1/provider/subscription/verify — verify Razorpay payment */
+  app.post('/subscription/verify', async (req, reply) => {
+    const ctx = await requireProviderAuth(app, req, reply)
+    if (!ctx) return
+
+    const { subscription_id, razorpay_order_id, razorpay_payment_id, razorpay_signature } =
+      req.body as any
+
+    if (!subscription_id || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return reply.status(400).send({ error: 'Missing payment details' })
+    }
+
+    // Verify signature via payment-service
+    const PAYMENT = process.env.PAYMENT_SERVICE_URL || 'http://payment-service:3002'
+    const verifyRes = await fetch(`${PAYMENT}/v1/razorpay/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature,
+      }),
+    })
+
+    if (!verifyRes.ok) {
+      return reply.status(400).send({ error: 'Payment verification failed' })
+    }
+
+    // Activate subscription
+    const now = new Date()
+    const expiresAt = new Date(now.getTime() + QUARTERLY_DAYS * 24 * 60 * 60 * 1000)
+
+    const { rows } = await app.db.query(
+      `UPDATE provider_subscriptions
+          SET status = 'active',
+              starts_at = $2,
+              expires_at = $3,
+              razorpay_order_id = $4,
+              razorpay_payment_id = $5
+        WHERE id = $1 AND provider_id = $6
+        RETURNING *`,
+      [subscription_id, now.toISOString(), expiresAt.toISOString(),
+       razorpay_order_id, razorpay_payment_id, ctx.providerId],
+    )
+
+    if (!rows[0]) {
+      return reply.status(404).send({ error: 'Subscription not found' })
+    }
+
+    // Clear lapsed state on provider
+    await app.db.query(
+      `UPDATE providers SET subscription_required = true, subscription_grace_until = NULL WHERE id = $1`,
+      [ctx.providerId],
+    )
+
+    return { ok: true, subscription: rows[0] }
+  })
+
+  /** PATCH /v1/provider/subscription/auto-renew — toggle auto-renew */
+  app.patch('/subscription/auto-renew', async (req, reply) => {
+    const ctx = await requireProviderAuth(app, req, reply)
+    if (!ctx) return
+
+    const { autoRenew } = req.body as any
+    await app.db.query(
+      `UPDATE provider_subscriptions SET auto_renew = $2
+       WHERE provider_id = $1 AND status = 'active' AND expires_at > NOW()`,
+      [ctx.providerId, !!autoRenew],
+    )
+    return { ok: true }
+  })
 }

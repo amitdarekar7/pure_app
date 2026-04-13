@@ -117,24 +117,43 @@ export default function ProviderProfileScreen() {
     phone.trim() !== (providerProfile?.phone ?? '') ||
     address.trim() !== (providerProfile?.address ?? '')
 
-  return (
-    <View style={styles.root}>
-      <View style={styles.centerWrap}>
-        {/* Header */}
-        <View style={styles.headerBar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
-            <Text style={styles.backArrow}>←</Text>
-            <Text style={styles.backText}>Back</Text>
-          </Pressable>
-          <Image source={LOGO} style={styles.logoImg} resizeMode="contain" />
-        </View>
+  const firstName = providerProfile?.name
+    ? providerProfile.name.split(' ')[0]
+    : (providerUser?.email ?? 'Provider').split('@')[0]
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Avatar card */}
-          <View style={styles.avatarCard}>
+  const greeting = (() => {
+    const h = new Date().getHours()
+    if (h < 12) return 'Good morning'
+    if (h < 17) return 'Good afternoon'
+    return 'Good evening'
+  })()
+
+  return (
+    <ScrollView
+      style={styles.root}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={styles.inner}>
+
+        {/* ── Hero Header (matches dashboard) ── */}
+        <View style={styles.heroCard}>
+          {/* Top bar: logo + back */}
+          <View style={styles.heroTop}>
+            <Pressable onPress={() => router.push('/(provider)/dashboard')}>
+              <Image source={LOGO} style={styles.logoImg} resizeMode="contain" />
+            </Pressable>
+            <Pressable onPress={() => router.back()} style={styles.backPill}>
+              <Text style={styles.backArrow}>←</Text>
+              <Text style={styles.backText}>Back</Text>
+            </Pressable>
+          </View>
+
+          {/* Greeting row with avatar */}
+          <View style={styles.greetingRow}>
             <Pressable onPress={pickAndUploadPhoto} style={styles.avatarTouchable}>
               {profileImg ? (
-                <Image source={{ uri: profileImg }} style={styles.avatarImage} />
+                <Image source={{ uri: profileImg }} style={styles.avatarImg} />
               ) : (
                 <View style={styles.avatarCircle}>
                   <Text style={styles.avatarLetter}>{initial}</Text>
@@ -147,14 +166,25 @@ export default function ProviderProfileScreen() {
                 }
               </View>
             </Pressable>
-            <Text style={styles.photoHint}>Tap to change photo</Text>
-            <Text style={styles.avatarName}>{providerProfile?.name ?? 'Provider'}</Text>
-            <Text style={styles.avatarEmail}>{email}</Text>
+            <View style={styles.greetingInfo}>
+              <Text style={styles.greetingText}>{greeting},</Text>
+              <Text style={styles.greetingName}>{firstName} 👋</Text>
+            </View>
+          </View>
+
+          {providerProfile?.address && (
+            <Text style={styles.addressText}>📍 {providerProfile.address}</Text>
+          )}
+
+          {/* Status badge */}
+          <View style={styles.statusRow}>
             <View style={styles.statusBadge}>
               <View style={[styles.statusDot, { backgroundColor: providerProfile?.status === 'active' ? '#059669' : '#EF4444' }]} />
               <Text style={styles.statusText}>{providerProfile?.status ?? 'unknown'}</Text>
             </View>
+            <Text style={styles.emailHint}>{email}</Text>
           </View>
+        </View>
 
           {/* Edit form */}
           <View style={styles.formCard}>
@@ -226,90 +256,97 @@ export default function ProviderProfileScreen() {
           </View>
 
           <View style={{ height: 40 }} />
-        </ScrollView>
-      </View>
-    </View>
+        </View>
+    </ScrollView>
   )
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#F9FAFB' },
-  centerWrap: { flex: 1, width: '100%', maxWidth: 560, alignSelf: 'center' },
 
-  // Header
-  headerBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  // ── Layout (matches dashboard) ──
+  scrollContent: { alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 },
+  inner: { width: '100%', maxWidth: 560 },
+
+  // ── Hero header ──
+  heroCard: {
     backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: BORDER,
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: BORDER,
   },
-  backBtn: {
+  heroTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  logoImg: { width: 80, height: 30 },
+  backPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingVertical: 4,
-    paddingRight: 12,
+    paddingHorizontal: 10,
   },
   backArrow: { fontSize: 20, color: ACCENT, fontWeight: '700' },
   backText: { fontSize: 14, color: ACCENT, fontWeight: '700' },
-  logoImg: { width: 80, height: 30 },
 
-  content: { paddingHorizontal: 16, paddingTop: 16 },
-
-  // Avatar card
-  avatarCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
+  greetingRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: BORDER,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  avatarCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: ACCENT,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarImage: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    gap: 14,
+    marginBottom: 8,
   },
   avatarTouchable: {
     position: 'relative',
-    marginBottom: 6,
   },
+  avatarCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: ACCENT,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  avatarLetter: { color: '#fff', fontWeight: '900', fontSize: 20 },
+  avatarImg: { width: 48, height: 48, borderRadius: 24 },
   cameraOverlay: {
     position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    bottom: -2,
+    right: -2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: ACCENT,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: '#fff',
   },
-  cameraIcon: { fontSize: 14 },
-  photoHint: { fontSize: 11, color: '#9CA3AF', marginBottom: 8 },
-  avatarLetter: { color: '#fff', fontSize: 28, fontWeight: '900' },
-  avatarName: { fontSize: 20, fontWeight: '900', color: DARK, marginBottom: 4 },
-  avatarEmail: { fontSize: 13, color: GREY, marginBottom: 10 },
+  cameraIcon: { fontSize: 10 },
+  greetingInfo: {},
+  greetingText: { fontSize: 13, color: GREY, fontWeight: '500' },
+  greetingName: { fontSize: 22, fontWeight: '900', color: DARK, marginTop: 2 },
+  addressText: { fontSize: 12, color: GREY, marginTop: 6 },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 12,
+  },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -323,6 +360,7 @@ const styles = StyleSheet.create({
   },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   statusText: { fontSize: 12, fontWeight: '700', color: GREY, textTransform: 'capitalize' },
+  emailHint: { fontSize: 12, color: '#9CA3AF' },
 
   // Form card
   formCard: {

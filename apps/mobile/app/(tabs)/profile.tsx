@@ -23,39 +23,6 @@ import { UsersAPI } from '../../lib/api'
 
 const LOGO = require('../../assets/images/logo_pure.png')
 
-function Avatar({
-  name,
-  uri,
-  uploading,
-  onPress,
-}: {
-  name:      string | null
-  uri?:      string | null
-  uploading?: boolean
-  onPress?:  () => void
-}) {
-  const initials = (name ?? '?')
-    .split(' ')
-    .map((w) => w[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2)
-  return (
-    <Pressable onPress={onPress} style={styles.avatarWrapper}>
-      <View style={styles.avatar}>
-        {uri
-          ? <Image source={{ uri }} style={styles.avatarImage} />
-          : <Text style={styles.avatarText}>{initials}</Text>}
-      </View>
-      <View style={styles.avatarEdit}>
-        {uploading
-          ? <ActivityIndicator size={12} color="#fff" />
-          : <Ionicons name="camera" size={13} color="#fff" />}
-      </View>
-    </Pressable>
-  )
-}
-
 export default function ProfileScreen() {
   const { user, logout, refreshUser, isLoading: authLoading } = useAuth()
   const router = useRouter()
@@ -313,6 +280,17 @@ export default function ProfileScreen() {
     router.replace('/(auth)/login')
   }
 
+  const firstName = user?.display_name
+    ? user.display_name.split(' ')[0]
+    : (user?.email ?? 'User').split('@')[0]
+
+  const greeting = (() => {
+    const h = new Date().getHours()
+    if (h < 12) return 'Good morning'
+    if (h < 17) return 'Good afternoon'
+    return 'Good evening'
+  })()
+
   if (!user) return null
 
   return (
@@ -320,35 +298,65 @@ export default function ProfileScreen() {
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="always">
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="always"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={{ width: '100%', maxWidth: maxW, alignSelf: 'center' }}>
 
-        {/* ── Logo + back row (same structure as home header) ──────────── */}
-        <View style={styles.topBar}>
-          <Pressable onPress={() => router.replace('/(tabs)/home')} style={styles.topBarBack}>
-            <Ionicons name="arrow-back" size={20} color="#7c6af7" />
-          </Pressable>
-          <Pressable onPress={() => router.navigate('/(tabs)/home')} hitSlop={8}>
-            <Image source={LOGO} style={styles.topBarLogo} resizeMode="contain" />
-          </Pressable>
-          <View style={styles.topBarSpacer} />
-        </View>
+        {/* ── Hero Header (dashboard style) ── */}
+        <View style={styles.heroCard}>
+          <View style={styles.heroTop}>
+            <Pressable onPress={() => router.navigate('/(tabs)/home')} hitSlop={8}>
+              <Image source={LOGO} style={styles.logoImg} resizeMode="contain" />
+            </Pressable>
+            <Pressable onPress={pickAvatar}>
+              {user.avatar_url ? (
+                <Image source={{ uri: user.avatar_url }} style={styles.avatarImgSm} />
+              ) : (
+                <View style={styles.avatarCircleSm}>
+                  <Text style={styles.avatarLetterSm}>
+                    {firstName[0].toUpperCase()}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+          </View>
 
-        {/* Header card */}
-        <View style={styles.headerCard}>
-          <Avatar
-            name={user.display_name}
-            uri={user.avatar_url}
-            uploading={uploadingAvatar}
-            onPress={pickAvatar}
-          />
-          <Text style={styles.displayName}>{user.display_name ?? 'No name set'}</Text>
-          <Text style={styles.email}>{user.email}</Text>
-          {user.phone
-            ? <Text style={styles.phone}>{user.phone}</Text>
-            : null}
-          <View style={[styles.statusBadge, user.status === 'active' && styles.statusActive]}>
-            <Text style={styles.statusText}>{user.status}</Text>
+          <View style={styles.greetingRow}>
+            <Pressable onPress={pickAvatar} style={styles.avatarTouchable}>
+              {user.avatar_url ? (
+                <Image source={{ uri: user.avatar_url }} style={styles.avatarImg} />
+              ) : (
+                <View style={styles.avatarCircle}>
+                  <Text style={styles.avatarLetter}>
+                    {firstName[0].toUpperCase()}
+                  </Text>
+                </View>
+              )}
+              <View style={styles.cameraOverlay}>
+                {uploadingAvatar
+                  ? <ActivityIndicator size={10} color="#fff" />
+                  : <Ionicons name="camera" size={11} color="#fff" />}
+              </View>
+            </Pressable>
+            <View style={styles.greetingInfo}>
+              <Text style={styles.greetingText}>{greeting},</Text>
+              <Text style={styles.greetingName}>{firstName} 👋</Text>
+            </View>
+          </View>
+
+          {user.address ? (
+            <Text style={styles.addressText}>📍 {user.address}</Text>
+          ) : null}
+
+          <View style={styles.statusRow}>
+            <View style={[styles.statusBadge, user.status === 'active' && styles.statusActive]}>
+              <View style={[styles.statusDot, { backgroundColor: user.status === 'active' ? '#059669' : '#EF4444' }]} />
+              <Text style={styles.statusLabel}>{user.status}</Text>
+            </View>
+            <Text style={styles.emailHint}>{user.email}</Text>
           </View>
         </View>
 
@@ -409,8 +417,8 @@ export default function ProfileScreen() {
                     disabled={locLoading}
                   >
                     {locLoading
-                      ? <ActivityIndicator size="small" color="#7c6af7" />
-                      : <Ionicons name="locate" size={15} color="#7c6af7" />}
+                      ? <ActivityIndicator size="small" color={ACCENT} />
+                      : <Ionicons name="locate" size={15} color={ACCENT} />}
                     <Text style={styles.locBtnText}>{locLoading ? 'Detecting\u2026' : 'Use my location'}</Text>
                   </Pressable>
                 </>
@@ -476,77 +484,138 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
+const ACCENT = '#E8590C'
+const DARK   = '#1B1B1B'
+const GREY   = '#6B7280'
+const BORDER = '#F3F4F6'
+
 const styles = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: '#f5f5f7' },
-  scroll: { padding: 16, paddingBottom: 40 },
+  root:   { flex: 1, backgroundColor: '#F9FAFB' },
+  scroll: { alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 },
 
-  // ── Logo + back row (inside scroll, same as home header) ────────────
-  topBar: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    width:             '100%',
-    marginBottom:      20,
+  // ── Hero header (dashboard style) ──
+  heroCard: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: BORDER,
+    width: '100%',
   },
-  topBarBack:   { padding: 4 },
-  topBarLogo:   { flex: 1, height: 48, marginHorizontal: 8 },
-  topBarSpacer: { width: 28 },
-
-  headerCard: {
-    width:           '100%',
-    backgroundColor: '#ffffff',
-    borderRadius:     20,
-    padding:          28,
-    alignItems:       'center',
-    marginBottom:     16,
-    shadowColor:      '#000',
-    shadowOffset:     { width: 0, height: 4 },
-    shadowOpacity:    0.08,
-    shadowRadius:     16,
-    elevation:        6,
+  heroTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
   },
-  avatarWrapper: { position: 'relative', marginBottom: 12 },
-  avatar:        { width: 76, height: 76, borderRadius: 38, backgroundColor: '#0f0f23', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
-  avatarImage:   { position: 'absolute', top: 0, left: 0, width: 76, height: 76, borderRadius: 38 },
-  avatarText:    { color: '#7c6af7', fontSize: 26, fontWeight: '900' },
-  avatarEdit:    { position: 'absolute', bottom: 0, right: -2, backgroundColor: '#7c6af7', borderRadius: 12, padding: 5, borderWidth: 2, borderColor: '#fff' },
-  displayName: { color: '#0f0f23', fontSize: 20, fontWeight: '800' },
-  email:       { color: '#888',    fontSize: 14, marginTop: 4 },
-  phone:       { color: '#888',    fontSize: 14, marginTop: 2 },
-  statusBadge: { backgroundColor: '#f0f0f8', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4, marginTop: 10 },
-  statusActive:{ backgroundColor: '#e8f5e9' },
-  statusText:  { color: '#2e7d32', fontSize: 12, fontWeight: '700' },
+  logoImg: { width: 80, height: 30 },
+  avatarCircleSm: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center',
+  },
+  avatarLetterSm: { color: '#fff', fontWeight: '900', fontSize: 14 },
+  avatarImgSm: { width: 34, height: 34, borderRadius: 17 },
 
-  successBox:  { width: '100%', backgroundColor: '#e8f5e9', borderRadius: 10, padding: 12, alignItems: 'center', marginBottom: 12 },
-  successText: { color: '#2e7d32', fontWeight: '700' },
+  greetingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginBottom: 8,
+  },
+  avatarTouchable: { position: 'relative' },
+  avatarCircle: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center',
+    shadowColor: ACCENT, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 6, elevation: 3,
+  },
+  avatarLetter: { color: '#fff', fontWeight: '900', fontSize: 20 },
+  avatarImg: { width: 48, height: 48, borderRadius: 24 },
+  cameraOverlay: {
+    position: 'absolute', bottom: -2, right: -2,
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: '#fff',
+  },
+  greetingInfo: {},
+  greetingText: { fontSize: 13, color: GREY, fontWeight: '500' },
+  greetingName: { fontSize: 22, fontWeight: '900', color: DARK, marginTop: 2 },
+  addressText: { fontSize: 12, color: GREY, marginTop: 6 },
+  statusRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12,
+  },
+  statusBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#F9FAFB', borderRadius: 20,
+    paddingHorizontal: 12, paddingVertical: 6,
+    borderWidth: 1, borderColor: BORDER,
+  },
+  statusActive: { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusLabel: { fontSize: 12, fontWeight: '700', color: GREY, textTransform: 'capitalize' },
+  emailHint: { fontSize: 12, color: '#9CA3AF' },
 
-  section:       { width: '100%', backgroundColor: '#ffffff', borderRadius: 20, overflow: 'hidden', marginBottom: 16,
-                   shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 3 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f8' },
-  sectionTitle:  { color: '#0f0f23', fontSize: 15, fontWeight: '800' },
-  editBtn:       { backgroundColor: '#f0f0f8', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
-  editBtnText:   { color: '#7c6af7', fontSize: 13, fontWeight: '700' },
+  // ── Success ──
+  successBox:  { width: '100%', backgroundColor: '#ECFDF5', borderRadius: 10, padding: 12, alignItems: 'center', marginBottom: 12, borderWidth: 1, borderColor: '#A7F3D0' },
+  successText: { color: '#059669', fontWeight: '700', fontSize: 13 },
 
-  field:       { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f8' },
-  fieldLabel:  { color: '#aaa', fontSize: 12, fontWeight: '700', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
-  fieldValue:  { color: '#0f0f23', fontSize: 15 },
-  fieldInput:  { color: '#0f0f23', fontSize: 15, backgroundColor: '#f8f8fc', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: '#ebebf5' },
-  locBtn:      { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#e0daff', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#f5f3ff', alignSelf: 'flex-start' },
-  locBtnText:  { color: '#7c6af7', fontSize: 13, fontWeight: '700' },
-  textArea:    { height: 80, textAlignVertical: 'top' },
+  // ── Profile section ──
+  section: {
+    width: '100%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden', marginBottom: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
+    borderWidth: 1, borderColor: BORDER,
+  },
+  sectionHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    padding: 16, borderBottomWidth: 1, borderBottomColor: BORDER,
+  },
+  sectionTitle: { fontSize: 18, fontWeight: '900', color: DARK },
+  editBtn: { backgroundColor: '#FFF4ED', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
+  editBtnText: { color: ACCENT, fontSize: 13, fontWeight: '700' },
 
-  error: { color: '#e53935', textAlign: 'center', marginBottom: 12, fontSize: 13, width: '100%' },
+  field:      { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: BORDER },
+  fieldLabel: { color: GREY, fontSize: 11, fontWeight: '800', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
+  fieldValue: { color: DARK, fontSize: 15 },
+  fieldInput: {
+    color: DARK, fontSize: 15, backgroundColor: '#F9FAFB', borderRadius: 12,
+    paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1.5, borderColor: '#E5E7EB',
+  },
+  locBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    borderWidth: 1, borderColor: '#FFDAC8', borderRadius: 8,
+    paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#FFF4ED', alignSelf: 'flex-start',
+  },
+  locBtnText: { color: ACCENT, fontSize: 13, fontWeight: '700' },
 
-  editActions:  { flexDirection: 'row', gap: 10, marginBottom: 16, width: '100%' },
-  cancelBtn:    { flex: 1, backgroundColor: '#f0f0f8', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  cancelBtnText:{ color: '#666', fontWeight: '700' },
-  saveBtn:      { flex: 2, backgroundColor: '#0f0f23', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  saveBtnText:  { color: '#fff', fontWeight: '800', fontSize: 15 },
+  error: { color: '#EF4444', textAlign: 'center', marginBottom: 12, fontSize: 13, width: '100%' },
 
-  logoutBtn:      { width: '100%', borderWidth: 1.5, borderColor: '#ffcdd2', borderRadius: 14, paddingVertical: 15, alignItems: 'center', backgroundColor: '#fff5f5' },
-  logoutBtnText:  { color: '#e53935', fontWeight: '700', fontSize: 15 },
+  // ── Edit actions ──
+  editActions:   { flexDirection: 'row', gap: 10, marginBottom: 16, width: '100%' },
+  cancelBtn:     { flex: 1, backgroundColor: BORDER, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  cancelBtnText: { color: GREY, fontWeight: '700' },
+  saveBtn:       {
+    flex: 2, backgroundColor: ACCENT, borderRadius: 12, paddingVertical: 14, alignItems: 'center',
+    shadowColor: ACCENT, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 6, elevation: 3,
+  },
+  saveBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
 
-  confirmBox:     { width: '100%', backgroundColor: '#ffffff', borderRadius: 16, padding: 20, marginTop: 8,
-                    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 3 },
-  confirmText:    { color: '#0f0f23', fontSize: 15, textAlign: 'center', marginBottom: 16 },
+  // ── Logout ──
+  logoutBtn:     {
+    width: '100%', backgroundColor: '#FEF2F2', borderRadius: 14, paddingVertical: 15,
+    alignItems: 'center', borderWidth: 1, borderColor: '#FECACA',
+  },
+  logoutBtnText: { color: '#DC2626', fontWeight: '700', fontSize: 15 },
+
+  confirmBox:     {
+    width: '100%', backgroundColor: '#fff', borderRadius: 16, padding: 20, marginTop: 8,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 10, elevation: 3,
+    borderWidth: 1, borderColor: BORDER,
+  },
+  confirmText:    { color: DARK, fontSize: 15, textAlign: 'center', marginBottom: 16 },
   confirmActions: { flexDirection: 'row', gap: 10 },
 })
