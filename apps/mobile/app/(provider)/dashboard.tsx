@@ -12,6 +12,7 @@ import {
 } from 'react-native'
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'expo-router'
+import { Ionicons } from '@expo/vector-icons'
 import { useProviderAuth } from '../../lib/provider-auth-context'
 import { ProviderPortalAPI, type ProviderStats, type ProviderService } from '../../lib/api'
 
@@ -93,20 +94,32 @@ export default function ProviderDashboard() {
             HERO HEADER
          ═══════════════════════════════════════════════════════════════════ */}
         <View style={styles.heroCard}>
-          {/* Top bar: logo + avatar */}
+          {/* Top bar: logo + bell + avatar */}
           <View style={styles.heroTop}>
             <Pressable onPress={() => router.push('/(provider)/dashboard')}>
               <Image source={LOGO} style={styles.logoImg} resizeMode="contain" />
             </Pressable>
-            <Pressable style={styles.heroRight} onPress={() => router.push('/(provider)/profile')}>
-              {providerProfile?.profile_image_url ? (
-                <Image source={{ uri: providerProfile.profile_image_url }} style={styles.avatarImgSm} />
-              ) : (
-                <View style={styles.avatarCircleSm}>
-                  <Text style={styles.avatarLetterSm}>{firstName[0].toUpperCase()}</Text>
-                </View>
-              )}
-            </Pressable>
+            <View style={styles.heroRight}>
+              <Pressable style={styles.bellWrap} onPress={() => router.push('/(provider)/bookings')}>
+                <Ionicons name="notifications-outline" size={22} color="#374151" />
+                {(stats?.pending ?? 0) > 0 && (
+                  <View style={styles.bellBadge}>
+                    <Text style={styles.bellBadgeText}>
+                      {(stats?.pending ?? 0) > 9 ? '9+' : stats?.pending}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+              <Pressable onPress={() => router.push('/(provider)/profile')}>
+                {providerProfile?.profile_image_url ? (
+                  <Image source={{ uri: providerProfile.profile_image_url }} style={styles.avatarImgSm} />
+                ) : (
+                  <View style={styles.avatarCircleSm}>
+                    <Text style={styles.avatarLetterSm}>{firstName[0].toUpperCase()}</Text>
+                  </View>
+                )}
+              </Pressable>
+            </View>
           </View>
 
           {/* Greeting */}
@@ -308,7 +321,23 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   logoImg: { width: 80, height: 30 },
-  heroRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  heroRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  bellWrap: { position: 'relative', padding: 4 },
+  bellBadge: {
+    position:        'absolute',
+    top:             0,
+    right:           0,
+    minWidth:        17,
+    height:          17,
+    borderRadius:    9,
+    backgroundColor: '#EF4444',
+    alignItems:      'center',
+    justifyContent:  'center',
+    paddingHorizontal: 4,
+    borderWidth:     1.5,
+    borderColor:     '#fff',
+  },
+  bellBadgeText: { color: '#fff', fontSize: 9, fontWeight: '800' },
   avatarCircleSm: {
     width: 34, height: 34, borderRadius: 17,
     backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center',

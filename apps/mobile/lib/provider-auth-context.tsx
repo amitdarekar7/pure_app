@@ -8,6 +8,7 @@ import {
 } from 'firebase/auth'
 import { firebaseAuth } from './firebase'
 import { ProviderPortalAPI, type ProviderProfile } from './api'
+import { registerForPushNotifications } from './push-notifications'
 
 interface ProviderAuthCtx {
   providerUser:     FirebaseUser | null
@@ -45,6 +46,8 @@ export function ProviderAuthProvider({ children }: { children: React.ReactNode }
           const { provider, services: _ } = await ProviderPortalAPI.me()
           setProviderProfile(provider)
           setProviderId(provider.id)
+          // Register push notification token after successful backend sync
+          registerForPushNotifications().catch(() => {})
         } catch {
           // Firebase user exists but may not be a provider — leave profile null
           setProviderProfile(null)

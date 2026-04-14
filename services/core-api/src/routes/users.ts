@@ -100,4 +100,42 @@ export async function userRoutes(app: FastifyInstance) {
 
     return { devices: result.rows }
   })
+
+  // ── PUT /v1/users/me/push-token ───────────────────────────────────────────
+  // Register or update the FCM push token for the current user's device.
+  // Body: { token: string, platform: 'ios' | 'android' | 'web' }
+  app.put<{
+    Body: { token: string; platform: string }
+  }>(
+    '/me/push-token',
+    { preHandler: requireAuth },
+    async (req, reply) => {
+      const uid = req.firebaseUid
+      const { token, platform } = req.body ?? {}
+
+      if (!token || typeof token !== 'string') {
+        return reply.status(400).send({ error: 'token is required' })
+      }
+      if (!['ios', 'android', 'web'].includes(platform)) {
+        return reply.status(400).send({ error: 'platform must be ios, android, or web' })
+      }
+
+      const { rows: uRows } = await app.db.query<{ id: string }>(
+        `SELECT id FROM users WHERE firebase_uid = $1`,
+        [uid],
+      )
+      if (!uRows[0]) return reply.status(401).send({ error: 'user not found' })
+
+      // Upsert: insert a device row or update the push_token if the device_token already exists
+      await app.db.query(
+        `INSERT INTO devices (user_id, device_token, platform, push_token, last_seen_at)
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (device_token)
+         DO UPDATE SET push_token = $4, last_seen_at = NOW()`,
+        [uRows[0].id, `fcm:${uid}:${platform}`, platform, token],
+      )
+
+      return reply.status(204).send()
+    },
+  )
 }

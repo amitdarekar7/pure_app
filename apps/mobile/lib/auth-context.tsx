@@ -9,6 +9,7 @@ import {
 import { firebaseAuth } from './firebase'
 import { AuthAPI, UsersAPI } from './api'
 import type { User } from './api'
+import { registerForPushNotifications } from './push-notifications'
 
 /** Build a minimal User from Firebase auth data (used when backend is unreachable) */
 function userFromFirebase(fbUser: FirebaseUser): User {
@@ -53,6 +54,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Then upgrade with full profile from our backend (display_name, bio, etc.)
           const me = await UsersAPI.me()
           setUser(me)
+          // Register push notification token after successful backend sync
+          registerForPushNotifications().catch(() => {})
         } catch {
           // Backend unreachable — keep the Firebase-derived user so the header still shows
         }

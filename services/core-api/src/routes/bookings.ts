@@ -3,6 +3,7 @@ import { randomUUID, randomInt } from 'crypto'
 import { requireAuth } from '../middleware/auth'
 import { publish } from '../kafka/producer'
 import { TOPICS } from '../kafka/topics'
+import { sendPushNotification } from '../notifications'
 
 /** Generate a 6-digit numeric OTP */
 function generateOTP(): string {
@@ -138,6 +139,26 @@ export async function bookingRoutes(app: FastifyInstance) {
         },
       }).catch((err: Error) =>
         app.log.error({ err }, '[kafka] Failed to publish booking.requested'),
+      )
+
+      // ── Send FCM push notification to the provider (fire-and-forget) ────
+      // Look up the provider's user_id via provider_accounts
+      app.db.query<{ user_id: string }>(
+        `SELECT user_id FROM provider_accounts WHERE provider_id = $1`,
+        [provider_id],
+      ).then(({ rows: paRows }) => {
+        if (!paRows[0]) return
+        const userName = uRows[0].display_name ?? 'A customer'
+        return sendPushNotification(app.db, paRows[0].user_id, {
+          title: '🔔 New Booking Request!',
+          body:  `${userName} wants to book "${serviceTitle}"`,
+          data: {
+            type:       'booking.requested',
+            booking_id: booking.id,
+          },
+        })
+      }).catch((err: Error) =>
+        app.log.error({ err }, '[fcm] Failed to send booking push notification'),
       )
 
       return reply.status(201).send({

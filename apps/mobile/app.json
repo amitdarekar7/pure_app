@@ -34,7 +34,17 @@
     },
     "plugins": [
       "expo-router",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/logo_pure.jpeg",
+          "color": "#E8590C",
+          "sounds": [],
+          "androidMode": "default",
+          "androidCollapsedTitle": "PureApp"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

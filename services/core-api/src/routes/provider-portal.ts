@@ -5,6 +5,7 @@ import { publish } from '../kafka/producer'
 import { TOPICS } from '../kafka/topics'
 import { indexProviderService } from '../search-index'
 import { getSubscriptionStatus, QUARTERLY_PAISE, QUARTERLY_DAYS } from '../subscription'
+import { sendPushNotification } from '../notifications'
 
 /**
  * Provider Portal Routes — /v1/provider/*
@@ -432,6 +433,22 @@ export async function providerPortalRoutes(app: FastifyInstance) {
       }).catch((err: Error) =>
         app.log.error({ err }, '[kafka] Failed to publish booking.responded'),
       )
+
+      // ── Send FCM push notification to the user (fire-and-forget) ────────
+      {
+        const statusLabel = action === 'accept' ? 'accepted ✅' : action === 'reject' ? 'declined ❌' : 'rescheduled 📅'
+        sendPushNotification(app.db, booking.user_id, {
+          title: `Booking ${statusLabel}`,
+          body:  `${booking.provider_name ?? 'Your provider'} has ${statusLabel.replace(/\s*[✅❌📅]/, '')} your booking${booking.service_title ? ` for "${booking.service_title}"` : ''}`,
+          data: {
+            type:       'booking.responded',
+            booking_id: booking.id,
+            action,
+          },
+        }).catch((err: Error) =>
+          app.log.error({ err }, '[fcm] Failed to send booking response push notification'),
+        )
+      }
 
       return reply.send({ booking: { id: booking.id, status: booking.status, scheduled_at: booking.scheduled_at } })
     },

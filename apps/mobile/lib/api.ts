@@ -47,6 +47,8 @@ export const UsersAPI = {
   me:       ()                              => _auth<User>('GET',   `${CORE}/v1/users/me`),
   updateMe: (p: Partial<UpdatePayload>)     => _auth<void>('PATCH', `${CORE}/v1/users/me`, p),
   devices:  ()                              => _auth<{ devices: Device[] }>('GET', `${CORE}/v1/users/me/devices`),
+  registerPushToken: (token: string, platform: string) =>
+    _auth<void>('PUT', `${CORE}/v1/users/me/push-token`, { token, platform }),
 }
 
 // ─── Search API ───────────────────────────────────────────────────────────────

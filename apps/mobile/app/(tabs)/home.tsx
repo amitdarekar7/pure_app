@@ -364,17 +364,31 @@ export default function HomeScreen() {
             </Pressable>
 
             {user ? (
-              <Pressable style={styles.heroRight} onPress={() => router.push('/(tabs)/profile')}>
-                {user.avatar_url ? (
-                  <Image source={{ uri: user.avatar_url }} style={styles.avatarImgSm} />
-                ) : (
-                  <View style={styles.avatarCircleSm}>
-                    <Text style={styles.avatarLetterSm}>
-                      {firstName[0]?.toUpperCase() ?? 'U'}
-                    </Text>
-                  </View>
-                )}
-              </Pressable>
+              <View style={styles.heroRight}>
+                <Pressable style={styles.bellWrap} onPress={() => router.push('/(tabs)/bookings')}>
+                  <Ionicons name="notifications-outline" size={22} color="#374151" />
+                  {recentBookings.filter(b => b.status === 'pending').length > 0 && (
+                    <View style={styles.bellBadge}>
+                      <Text style={styles.bellBadgeText}>
+                        {recentBookings.filter(b => b.status === 'pending').length > 9
+                          ? '9+'
+                          : recentBookings.filter(b => b.status === 'pending').length}
+                      </Text>
+                    </View>
+                  )}
+                </Pressable>
+                <Pressable onPress={() => router.push('/(tabs)/profile')}>
+                  {user.avatar_url ? (
+                    <Image source={{ uri: user.avatar_url }} style={styles.avatarImgSm} />
+                  ) : (
+                    <View style={styles.avatarCircleSm}>
+                      <Text style={styles.avatarLetterSm}>
+                        {firstName[0]?.toUpperCase() ?? 'U'}
+                      </Text>
+                    </View>
+                  )}
+                </Pressable>
+              </View>
             ) : (
               <Pressable onPress={() => router.push('/(auth)/login')} style={styles.loginBtn}>
                 <Ionicons name="person-outline" size={13} color="#7c6af7" />
@@ -1224,7 +1238,23 @@ const styles = StyleSheet.create({
     alignItems:     'center',
     marginBottom:   20,
   },
-  heroRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  heroRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  bellWrap: { position: 'relative', padding: 4 },
+  bellBadge: {
+    position:        'absolute',
+    top:             0,
+    right:           0,
+    minWidth:        17,
+    height:          17,
+    borderRadius:    9,
+    backgroundColor: '#EF4444',
+    alignItems:      'center',
+    justifyContent:  'center',
+    paddingHorizontal: 4,
+    borderWidth:     1.5,
+    borderColor:     '#fff',
+  },
+  bellBadgeText: { color: '#fff', fontSize: 9, fontWeight: '800' },
   logoImg: { width: 80, height: 30 },
   avatarCircleSm: {
     width: 34, height: 34, borderRadius: 17,
