@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify'
 import { requireAuth } from '../middleware/auth'
+import { checkTextFields } from '../content-filter'
 
 interface SyncBody         { displayName?: string }
 interface LookupEmailBody  { phone: string }
@@ -46,6 +47,9 @@ export async function authRoutes(app: FastifyInstance) {
     const uid   = req.firebaseUid
     const email = req.firebaseEmail
     const { displayName } = req.body ?? {}
+
+    const flagged = checkTextFields({ displayName })
+    if (flagged) return reply.status(400).send({ error: `${flagged} contains inappropriate language` })
 
     const result = await app.db.query(
       `INSERT INTO users (firebase_uid, email)

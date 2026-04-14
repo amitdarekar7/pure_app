@@ -3,6 +3,7 @@ import { randomUUID, randomInt } from 'crypto'
 import { requireAuth } from '../middleware/auth'
 import { redisChannel } from '../redis-channels'
 import { sendPushNotification } from '../notifications'
+import { checkTextFields } from '../content-filter'
 
 /** Generate a 6-digit numeric OTP */
 function generateOTP(): string {
@@ -32,6 +33,9 @@ export async function bookingRoutes(app: FastifyInstance) {
     { preHandler: requireAuth },
     async (req, reply) => {
       const { providerServiceId, scheduledAt, notes, paymentMode = 'prepaid' } = req.body
+
+      const flagged = checkTextFields({ notes })
+      if (flagged) return reply.status(400).send({ error: 'notes contain inappropriate language' })
 
       if (!/^[0-9a-f-]{36}$/i.test(providerServiceId)) {
         return reply.status(400).send({ error: 'providerServiceId must be a valid UUID' })
@@ -318,6 +322,9 @@ export async function bookingRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const { id } = req.params
       const { reason } = req.body
+
+      const flagged = checkTextFields({ reason })
+      if (flagged) return reply.status(400).send({ error: 'reason contains inappropriate language' })
 
       if (!/^[0-9a-f-]{36}$/i.test(id)) {
         return reply.status(400).send({ error: 'invalid booking id' })

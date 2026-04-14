@@ -5,6 +5,8 @@ import { redisChannel } from '../redis-channels'
 import { indexProviderService } from '../search-index'
 import { getSubscriptionStatus, QUARTERLY_PAISE, QUARTERLY_DAYS } from '../subscription'
 import { sendPushNotification } from '../notifications'
+import { checkTextFields } from '../content-filter'
+import { checkImage } from '../image-moderator'
 
 /**
  * Provider Portal Routes — /v1/provider/*
@@ -68,6 +70,9 @@ export async function providerPortalRoutes(app: FastifyInstance) {
     { preHandler: requireAuth },
     async (req, reply) => {
       const { providerName, address, cityId, phone, displayName } = req.body
+
+      const flagged = checkTextFields({ providerName, address, displayName })
+      if (flagged) return reply.status(400).send({ error: `${flagged} contains inappropriate language` })
 
       if (!providerName || typeof providerName !== 'string' || providerName.trim().length < 2) {
         return reply.status(400).send({ error: 'providerName is required (min 2 chars)' })
@@ -232,6 +237,19 @@ export async function providerPortalRoutes(app: FastifyInstance) {
       if (!ctx) return
 
       const { name, phone, address, profileImageUrl } = req.body ?? {}
+
+      const flagged = checkTextFields({ name, address })
+      if (flagged) return reply.status(400).send({ error: `${flagged} contains inappropriate language` })
+
+      if (profileImageUrl) {
+        try {
+          const mod = await checkImage(profileImageUrl)
+          if (!mod.safe) return reply.status(400).send({ error: 'Image flagged as inappropriate' })
+        } catch {
+          return reply.status(503).send({ error: 'Image moderation service unavailable' })
+        }
+      }
+
       const sets: string[] = []
       const vals: unknown[] = []
       let idx = 1
@@ -607,6 +625,13 @@ export async function providerPortalRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'imageUrl is required (max 5 MB)' })
       }
 
+      try {
+        const mod = await checkImage(imageUrl)
+        if (!mod.safe) return reply.status(400).send({ error: 'Image flagged as inappropriate' })
+      } catch {
+        return reply.status(503).send({ error: 'Image moderation service unavailable' })
+      }
+
       // Verify service belongs to this provider
       const { rows: sRows } = await app.db.query<{ id: string }>(
         `SELECT id FROM provider_services WHERE id = $1 AND provider_id = $2`,
@@ -782,6 +807,9 @@ export async function providerPortalRoutes(app: FastifyInstance) {
       if (!ctx) return
 
       const { categorySlug, title, pricePaise, durationMins } = req.body
+
+      const flagged = checkTextFields({ title })
+      if (flagged) return reply.status(400).send({ error: 'title contains inappropriate language' })
 
       if (!categorySlug || typeof categorySlug !== 'string' || categorySlug.trim().length < 2) {
         return reply.status(400).send({ error: 'categorySlug is required' })

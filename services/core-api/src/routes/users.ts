@@ -1,5 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { requireAuth } from '../middleware/auth'
+import { checkTextFields } from '../content-filter'
+import { checkImage } from '../image-moderator'
 
 interface UpdateProfileBody {
   displayName?: string
@@ -48,6 +50,18 @@ export async function userRoutes(app: FastifyInstance) {
   app.patch<{ Body: UpdateProfileBody }>('/me', async (req, reply) => {
     const uid = req.firebaseUid
     const { displayName, avatarUrl, phone, bio, address, locale, timezone } = req.body
+
+    const flagged = checkTextFields({ displayName, bio, address })
+    if (flagged) return reply.status(400).send({ error: `${flagged} contains inappropriate language` })
+
+    if (avatarUrl) {
+      try {
+        const mod = await checkImage(avatarUrl)
+        if (!mod.safe) return reply.status(400).send({ error: 'Image flagged as inappropriate' })
+      } catch {
+        return reply.status(503).send({ error: 'Image moderation service unavailable' })
+      }
+    }
 
     const userResult = await app.db.query(
       `SELECT id FROM users WHERE firebase_uid = $1`,
