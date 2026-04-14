@@ -19,7 +19,6 @@ function localUrl(envVal: string | undefined, port: number): string {
 }
 
 const CORE    = localUrl(process.env.EXPO_PUBLIC_API_URL,    3000)
-const SEARCH  = localUrl(process.env.EXPO_PUBLIC_SEARCH_URL, 3001)
 const PAYMENT = localUrl(process.env.EXPO_PUBLIC_PAY_URL,    3002)
 const AI      = localUrl(process.env.EXPO_PUBLIC_AI_URL,     3003)
 
@@ -51,9 +50,9 @@ export const UsersAPI = {
     _auth<void>('PUT', `${CORE}/v1/users/me/push-token`, { token, platform }),
 }
 
-// ─── Search API ───────────────────────────────────────────────────────────────
+// ─── Search API (now served by core-api) ──────────────────────────────────────
 export const SearchAPI = {
-  query: (q: string) => _get<SearchResponse>(`${SEARCH}/v1/search?q=${encodeURIComponent(q)}`),
+  query: (q: string) => _get<SearchResponse>(`${CORE}/v1/search?q=${encodeURIComponent(q)}`),
 }
 
 // ─── Payment API ──────────────────────────────────────────────────────────────

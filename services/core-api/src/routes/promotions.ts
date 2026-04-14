@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { randomUUID } from 'crypto'
 import { requireAuth } from '../middleware/auth'
-import { indexProviderService } from '../search-index'
+import { refreshSearchIndex } from '../search-index'
 
 /**
  * Promotions Routes — /v1/promotions/*
@@ -141,12 +141,8 @@ export async function promotionRoutes(app: FastifyInstance) {
         )
       }
 
-      // Sync to OpenSearch for search ranking
-      try {
-        await syncProviderToSearch(app, providerId)
-      } catch (err) {
-        app.log.error({ err }, 'Failed to sync provider to search after promotion')
-      }
+      // Refresh search materialized view so ranking reflects new flags
+      refreshSearchIndex()
 
       return reply.status(201).send({
         promotion: {
@@ -213,64 +209,5 @@ export async function promotionRoutes(app: FastifyInstance) {
 }
 
 /**
- * Sync a provider's featured/boosted status to OpenSearch
+ * Refresh search index after promotion changes
  */
-async function syncProviderToSearch(app: FastifyInstance, providerId: string) {
-  const searchUrl = process.env.SEARCH_SERVICE_URL || 'http://localhost:3001'
-
-  // Get all provider_services to update their search docs
-  const { rows } = await app.db.query<{
-    service_id:     string
-    provider_name:  string
-    service_title:  string
-    category_slug:  string
-    address:        string | null
-    city_name:      string | null
-    area_name:      string | null
-    price_paise:    number
-    duration_mins:  number
-    likes_count:    number
-    status:         string
-    is_featured:    boolean
-    is_boosted:     boolean
-  }>(
-    `SELECT
-       ps.id AS service_id, p.name AS provider_name, ps.title AS service_title,
-       ps.category_slug, p.address, c.name AS city_name, a.name AS area_name,
-       ps.price_paise, ps.duration_mins, p.likes_count, p.status,
-       p.is_featured, p.is_boosted
-     FROM provider_services ps
-     JOIN providers p ON p.id = ps.provider_id
-     LEFT JOIN cities c ON c.id = p.city_id
-     LEFT JOIN areas a ON a.id = p.area_id
-     WHERE ps.provider_id = $1 AND ps.is_available = true`,
-    [providerId],
-  )
-
-  for (const doc of rows) {
-    await fetch(`${searchUrl}/v1/index`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: doc.service_id,
-        document: {
-          provider_id:   providerId,
-          provider_name: doc.provider_name,
-          service_id:    doc.service_id,
-          service_title: doc.service_title,
-          category_slug: doc.category_slug,
-          address:       doc.address,
-          city_name:     doc.city_name,
-          area_name:     doc.area_name,
-          price_paise:   doc.price_paise,
-          duration_mins: doc.duration_mins,
-          likes_count:   doc.likes_count,
-          status:        doc.status,
-          is_featured:   doc.is_featured,
-          is_boosted:    doc.is_boosted,
-          updated_at:    new Date().toISOString(),
-        },
-      }),
-    })
-  }
-}

@@ -59,24 +59,6 @@ services:
       timeout: 3s
       retries: 5
 
-  opensearch:
-    image: opensearchproject/opensearch:2.13.0
-    networks: [app_net]
-    environment:
-      - discovery.type=single-node
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=OpenSearch_2024!
-      - plugins.security.ssl.http.enabled=false
-      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
-    ports:
-      - "9200:9200"
-    volumes:
-      - opensearch_data:/usr/share/opensearch/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sfu admin:OpenSearch_2024! http://localhost:9200/_cluster/health | grep -v '\"status\":\"red\"'"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   # ─── Application Services ────────────────────────────────────────────────────
 
   core-api:
@@ -98,20 +80,6 @@ services:
       postgres-core:
         condition: service_healthy
       redis:
-        condition: service_healthy
-
-  search-service:
-    build:
-      context: ./services/search-service
-      dockerfile: Dockerfile
-    networks: [app_net]
-    ports:
-      - "3001:3001"
-    environment:
-      OPENSEARCH_URL: http://admin:OpenSearch_2024!@opensearch:9200
-      PORT: "3001"
-    depends_on:
-      opensearch:
         condition: service_healthy
 
   payment-service:
@@ -152,4 +120,3 @@ volumes:
   postgres_core_data:
   postgres_payments_data:
   redis_data:
-  opensearch_data:

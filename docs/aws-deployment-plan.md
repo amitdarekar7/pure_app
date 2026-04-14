@@ -20,13 +20,11 @@
     │   (2 vCPU, 2GB RAM) │
     │                     │
     │  ┌─ docker-compose ─┐│
-    │  │ core-api    :3000││
-    │  │ search-svc  :3001││
+    │  │ core-api    :3000││  ← includes search (PG full-text)
     │  │ payment-svc :3002││
     │  │ ai-service  :3003││
     │  │ postgres ×2      ││
     │  │ redis            ││
-    │  │ opensearch       ││
     │  │ nginx (TLS)      ││
     │  └──────────────────┘│
     └──────────────────────┘
@@ -71,7 +69,7 @@ docker compose -f docker-compose.prod.yml up -d
 
 # 4. Nginx reverse proxy (TLS via Let's Encrypt)
 sudo dnf install certbot python3-certbot-nginx nginx -y
-# Configure nginx to proxy /api → :3000, /search → :3001, etc.
+# Configure nginx to proxy /api → :3000, /payments → :3002, etc.
 sudo certbot --nginx -d api.pureapp.io -d app.pureapp.io
 
 # 5. Automated DB backups to S3
@@ -92,10 +90,11 @@ echo "0 3 * * * docker exec postgres-core pg_dumpall -U core | gzip | aws s3 cp 
 ### Capacity
 
 This handles **0 to ~5,000 concurrent users** comfortably:
-- Go + Rust services use almost no memory
+- Rust + Node services use minimal memory
 - PostgreSQL with 13 tables is tiny
-- Redis + OpenSearch fit in 2GB with the services
-- If memory gets tight, the first thing to offload is OpenSearch (use Postgres `tsvector` full-text search instead — zero extra memory)
+- Search uses PostgreSQL full-text search + pg_trgm (zero extra memory — no OpenSearch needed)
+- Redis handles caching + real-time pub/sub (no Kafka needed)
+- All 6 containers fit easily in 2GB RAM
 
 ### When to upgrade to Phase 1
 
@@ -132,42 +131,42 @@ The migration path is clean because your Docker images are already built for ECS
                         ┌──────▼───────┐
                         │  ALB         │  ← TLS termination, path routing
                         │  (public)    │
-                        └──┬──┬──┬──┬──┘
-                           │  │  │  │
-            ┌──────────────┘  │  │  └──────────────┐
-            │                 │  │                  │
-     ┌──────▼──────┐  ┌──────▼──┐  ┌───▼──────┐  ┌─▼──────────┐
-     │  core-api   │  │ search  │  │ payment  │  │ ai-service │
-     │  (Fargate)  │  │ service │  │ service  │  │ (Fargate)  │
-     │  1→20 tasks │  │(Fargate)│  │(Fargate) │  │ 1→10 tasks │
-     │  AUTO-SCALE │  │ 1→10   │  │ 1→8     │  │ AUTO-SCALE │
-     └──┬──┬──┬────┘  └────┬───┘  └──┬───────┘  └──┬─────────┘
-        │  │  │             │         │              │
-        │  │  └─────────────┼─────────┼──────────────┘
-        │  │                │         │
-        │  │    ┌───────────▼─────────▼──────────────┐
-        │  │    │     ElastiCache Serverless          │
-        │  │    │     (Redis — auto-scales ECPU)      │
-        │  │    └─────────────────────────────────────┘
-        │  │
-        │  └──────► MSK Serverless (Kafka — auto-scales throughput)
+                        └──┬─────┬──┬──┘
+                           │     │  │
+            ┌──────────────┘     │  └──────────────┐
+            │                    │                  │
+     ┌──────▼──────┐      ┌─────▼─────┐  ┌────────▼────┐
+     │  core-api   │      │ payment   │  │ ai-service  │
+     │  (Fargate)  │      │ service   │  │ (Fargate)   │
+     │  1→20 tasks │      │(Fargate)  │  │ 1→10 tasks  │
+     │  AUTO-SCALE │      │ 1→8      │  │ AUTO-SCALE  │
+     │  + search   │      └──┬───────┘  └──┬──────────┘
+     └──┬──┬───────┘         │              │
+        │  │                 │              │
+        │  └─────────────────┼──────────────┘
+        │                    │
+        │    ┌───────────────▼──────────────────────────┐
+        │    │     ElastiCache Serverless                │
+        │    │     (Redis — pub/sub + caching)           │
+        │    └──────────────────────────────────────────┘
         │
    ┌────▼──────────────────────────────┐
    │  Aurora Serverless v2             │
    │  (PostgreSQL 16)                  │
    │  ┌──────────┐  ┌───────────────┐  │
    │  │ core_db  │  │ payments_db   │  │ ← Same cluster, separate DBs
-   │  └──────────┘  └───────────────┘  │
+   │  │+ search  │  └───────────────┘  │ ← Full-text search via materialized view
+   │  └──────────┘                     │
    │  0.5 ACU → 128 ACU auto-scale    │
    │  + read replicas (auto-add)       │
    └───────────────────────────────────┘
 
-   ┌───────────────┐  ┌───────────────┐
-   │ OpenSearch     │  │ S3 Buckets    │
-   │ Serverless     │  │ web / uploads │
-   │ (auto-scale    │  │ / ML models   │
-   │  OCU)          │  │ / backups     │
-   └───────────────┘  └───────────────┘
+   ┌───────────────┐
+   │ S3 Buckets    │
+   │ web / uploads │
+   │ / ML models   │
+   │ / backups     │
+   └───────────────┘
 ```
 
 ### What auto-scales automatically (zero intervention)
@@ -177,8 +176,6 @@ The migration path is clean because your Docker images are already built for ECS
 | **Fargate tasks** | 1 per service | 10-50 per service | ECS Target Tracking (CPU/request count) |
 | **Aurora** | 0.5 ACU (~1 vCPU, 1 GB) | 128 ACU per instance | Built-in ACU auto-scaling |
 | **ElastiCache** | Baseline ECPU | Thousands of ECPU | Built-in serverless scaling |
-| **OpenSearch** | 2 OCU | 20+ OCU | Built-in serverless scaling |
-| **MSK** | Minimal throughput | GB/s throughput | Built-in serverless scaling |
 | **CloudFront** | Free tier | Tbytes | Global edge network |
 
 ---
@@ -197,12 +194,11 @@ The migration path is clean because your Docker images are already built for ECS
 | Service | **Min Tasks** | **Max Tasks** | vCPU | Memory | Scale Trigger |
 |---------|:------------:|:------------:|------|--------|---------------|
 | **core-api** | **1** | 20 | 0.25 | 512 MB | 60% CPU or 500 req/min |
-| **search-service** | **1** | 10 | 0.25 | 512 MB | 70% CPU |
 | **payment-service** | **1** | 8 | 0.25 | 512 MB | 60% CPU |
 | **ai-service** | **1** | 10 | 0.5 | 1 GB | 70% CPU |
 
-> **At 10 users:** 4 total tasks running (1 per service) = ~**$29/mo**
-> **At 1M users:** 30-50 tasks auto-scaled = ~**$500-800/mo**
+> **At 10 users:** 3 total tasks running (1 per service) = ~**$22/mo**
+> **At 1M users:** 20-38 tasks auto-scaled = ~**$400-650/mo**
 
 ### Auto-Scaling Policy
 ```
@@ -215,8 +211,8 @@ Min capacity: 1            ← KEY: never pay for idle capacity
 ```
 
 ### Cost Saver: Fargate Spot
-- **ai-service** and **search-service** on Fargate Spot = **70% cheaper**
-- These services are non-critical (recommendations + search can tolerate restarts)
+- **ai-service** on Fargate Spot = **70% cheaper**
+- AI recommendations are non-critical (can tolerate restarts)
 - payment-service and core-api stay on regular Fargate for reliability
 
 ---
@@ -236,7 +232,7 @@ Private Subnets (Fargate tasks):
   10.0.11.0/24 — ap-south-1b
   10.0.12.0/24 — ap-south-1c
 
-Database Subnets (RDS, ElastiCache, OpenSearch):
+Database Subnets (RDS, ElastiCache):
   10.0.20.0/24 — ap-south-1a
   10.0.21.0/24 — ap-south-1b
   10.0.22.0/24 — ap-south-1c
@@ -247,12 +243,10 @@ Database Subnets (RDS, ElastiCache, OpenSearch):
 | SG Name | Inbound | Outbound |
 |---------|---------|----------|
 | `sg-alb` | 443 from 0.0.0.0/0 | → sg-fargate:3000-3003 |
-| `sg-fargate` | 3000-3003 from sg-alb | → sg-db, sg-cache, sg-search, 443 (internet) |
+| `sg-fargate` | 3000-3003 from sg-alb | → sg-db, sg-cache, 443 (internet) |
 | `sg-db-core` | 5432 from sg-fargate | — |
 | `sg-db-payments` | 5432 from sg-fargate (payment-service only) | — |
 | `sg-cache` | 6379 from sg-fargate | — |
-| `sg-search` | 443 from sg-fargate | — |
-| `sg-kafka` | 9092 from sg-fargate | — |
 
 ### Cost Optimization: VPC Endpoints
 Save NAT Gateway data costs ($0.045/GB) with Interface Endpoints:
@@ -357,50 +351,44 @@ SSE pub/sub channels  → No TTL (real-time events)
 
 ---
 
-## 6. Search — Amazon OpenSearch Serverless
+## 6. Search — PostgreSQL Full-Text Search (Built-In)
 
-**Why Serverless over Managed:**
-- Auto-scales OCU (OpenSearch Compute Units) based on query load
-- No capacity planning — pay for actual usage
-- Minimum cost when idle
+**Why PostgreSQL instead of a separate search engine:**
+- **Zero extra infrastructure** — search runs inside Aurora Serverless v2 (already paid for)
+- **No sync lag** — queries hit actual data via a materialized view
+- **Fuzzy/typo matching** via `pg_trgm` extension (`word_similarity()`)
+- **Weighted full-text** via `tsvector` with rank weights (A/B/C/D)
+- **Featured/boosted scoring** via SQL expressions
 
-| Setting | Value |
-|---------|-------|
-| Collection type | Search |
-| Index | `providers` (existing mapping) |
-| Encryption | KMS-managed |
-| Access | VPC endpoint (sg-search) |
-| Indexing OCU | 2 (min) → 10 (max) |
-| Search OCU | 2 (min) → 20 (max) |
+### How it works
+- `provider_search` — materialized view joining providers × services × cities × areas
+- `GIN` indexes on `tsvector` (full-text) and `gin_trgm_ops` (fuzzy)
+- `REFRESH MATERIALIZED VIEW CONCURRENTLY` after mutations (debounced 2s)
+- core-api serves `GET /v1/search` directly — no separate service needed
 
 ### Cost
-- ~$350/mo minimum (2+2 OCU × $0.24/hr)
-- Scales automatically during peak search traffic
-- Alternative: Use managed domain (t3.small.search) at **~$40/mo** for early stage, migrate to Serverless at scale
-
-**Recommendation:** Start with **managed domain (t3.medium.search × 2 AZ)** at ~$80/mo, switch to Serverless when index size > 10GB or queries > 500/min.
+- **$0 additional** — included in Aurora ACU already in §4
+- Search queries add negligible load (indexed, sub-10ms response)
 
 ---
 
-## 7. Event Streaming — Amazon MSK Serverless
+## 7. Real-Time Events — Redis Pub/Sub (Built-In)
 
-**Why MSK Serverless:**
-- No broker management
-- Auto-scales throughput
-- Pay only for data in/out
-- Compatible with existing kafkajs/kafka-python clients
+**Why Redis Pub/Sub instead of Kafka/MSK:**
+- **Zero extra infrastructure** — uses ElastiCache already in §5
+- **No consumer groups to manage** — simple publish/subscribe
+- **Sub-millisecond latency** for real-time booking notifications
+- **FCM push notifications** handle offline delivery (not dependent on pub/sub)
 
-| Setting | Value |
-|---------|-------|
-| Cluster | MSK Serverless |
-| Topics | 8 (as per event contracts) |
-| Auth | IAM (no credentials to manage) |
-| Encryption | TLS in-transit, KMS at-rest |
-| VPC | Private subnets only |
+### How it works
+- core-api publishes booking events to Redis channels (`provider:{id}`, `user:{id}`)
+- SSE endpoint subscribes to the user's channel and streams events
+- If user is offline, FCM push notification delivers the alert
+- PostgreSQL is the source of truth — Redis is fire-and-forget
 
 ### Cost
-- $0.10/hr cluster + $0.10/GB data
-- At 1M users: ~$50-100/mo (events are small JSON payloads)
+- **$0 additional** — included in ElastiCache costs in §5
+- Pub/sub uses negligible ECPU
 
 ---
 
@@ -495,12 +483,10 @@ AWS WAF Rules:
   - `pure/payments/db` — DATABASE_URL_PAYMENTS
   - `pure/redis` — REDIS_URL
   - `pure/firebase` — FIREBASE_SERVICE_ACCOUNT_BASE64
-  - `pure/opensearch` — OPENSEARCH credentials
 - **IAM Roles** (no access keys):
-  - `ecsTaskRole-core-api` — S3, Secrets Manager, MSK
+  - `ecsTaskRole-core-api` — S3, Secrets Manager
   - `ecsTaskRole-payment` — Secrets Manager only (isolated)
-  - `ecsTaskRole-ai` — S3 (models), Secrets Manager, MSK
-  - `ecsTaskRole-search` — Secrets Manager only
+  - `ecsTaskRole-ai` — S3 (models), Secrets Manager
 - **Least-privilege** policies per service
 - **MFA required** for AWS Console access
 
@@ -520,14 +506,13 @@ Push to main
     ▼
 GitHub Actions
     ├── Run tests (unit + integration)
-    ├── Build Docker images (4 services)
+    ├── Build Docker images (3 services)
     ├── Push to ECR (tagged with git SHA)
     ├── Run DB migrations (RDS)
     ├── Update ECS task definitions
     └── Rolling deployment (zero downtime)
          ├── core-api: min 50% healthy
          ├── payment-service: min 50% healthy
-         ├── search-service: min 50% healthy
          └── ai-service: min 50% healthy
 ```
 
@@ -548,13 +533,11 @@ GitHub Actions
 | ALB | 5xx count, latency p99 | 5xx > 10/min, p99 > 2s |
 | RDS | CPU, connections, IOPS, replication lag | CPU > 75%, connections > 80% |
 | ElastiCache | Memory, evictions, connections | Memory > 80%, evictions > 0 |
-| MSK | Messages in, consumer lag | Consumer lag > 1000 |
 
 ### Application Logging
 ```
 ECS Tasks → CloudWatch Logs (awslogs driver)
   ├── /ecs/pure/core-api
-  ├── /ecs/pure/search-service
   ├── /ecs/pure/payment-service
   └── /ecs/pure/ai-service
 
@@ -562,8 +545,8 @@ Log retention: 30 days (archive to S3 after)
 ```
 
 ### Distributed Tracing
-- **AWS X-Ray** — trace requests across all 4 services
-- Trace Kafka events end-to-end
+- **AWS X-Ray** — trace requests across all 3 services
+- Trace booking flow end-to-end (core-api → payment-service → Redis pub/sub → SSE)
 - Identify bottlenecks in booking flow
 
 ---
@@ -581,11 +564,9 @@ When any upgrade trigger hits (§0), migrate to the elastic architecture below.
 
 | Resource | 10 Users | 1K Users | 100K Users | 1M+ Users |
 |----------|---------|---------|-----------|----------|
-| **ECS Fargate** (4 services) | $29 (1 task each) | $45 (1-2 tasks) | $200 (5-15 tasks) | $800 (30-50 tasks) |
+| **ECS Fargate** (3 services) | $22 (1 task each) | $35 (1-2 tasks) | $160 (5-12 tasks) | $650 (20-38 tasks) |
 | **Aurora Serverless v2** | $43 (0.5 ACU) | $87 (1 ACU) | $700 (8 ACU) | $2,800 (32 ACU + replicas) |
 | **ElastiCache Serverless** | $7 | $15 | $100 | $400 |
-| **OpenSearch** | $40 (t3.small managed) | $40 | $350 (Serverless) | $700 (Serverless high OCU) |
-| **MSK Serverless** | $50 | $55 | $100 | $300 |
 | **ALB** | $16 | $18 | $40 | $80 |
 | **NAT Gateway** (1 AZ) | $32 | $35 | $65 (2 AZ) | $100 (3 AZ) |
 | **CloudFront + S3** | $1 | $5 | $50 | $400 |
@@ -593,18 +574,18 @@ When any upgrade trigger hits (§0), migrate to the elastic architecture below.
 | **Route 53 + ACM** | $1 | $1 | $1 | $5 |
 | **Secrets + Logs** | $15 | $20 | $40 | $80 |
 | | | | | |
-| **TOTAL** | **~$259/mo** | **~$346/mo** | **~$1,681/mo** | **~$5,715/mo** |
+| **TOTAL** | **~$162/mo** | **~$241/mo** | **~$1,191/mo** | **~$4,565/mo** |
 
 ### Cost Per User (decreases as you scale)
 
 | Users | Monthly Cost | Cost Per User |
 |-------|-------------|---------------|
-| 10 | ~$259 | $25.90 |
-| 100 | ~$270 | $2.70 |
-| 1,000 | ~$346 | $0.35 |
-| 10,000 | ~$600 | $0.06 |
-| 100,000 | ~$1,681 | $0.017 |
-| 1,000,000 | ~$5,715 | $0.006 |
+| 10 | ~$162 | $16.20 |
+| 100 | ~$175 | $1.75 |
+| 1,000 | ~$241 | $0.24 |
+| 10,000 | ~$450 | $0.045 |
+| 100,000 | ~$1,191 | $0.012 |
+| 1,000,000 | ~$4,565 | $0.005 |
 
 > **Economics:** Once you have 1,000+ users paying even ₹50/mo each, revenue (~$600/mo) covers infrastructure.
 > At 10,000 users at ₹200/mo, revenue (~$24,000/mo) dwarfs infra costs.
@@ -632,15 +613,16 @@ Same Docker images. Same code. Just different connection strings.
 | Strategy | Savings | When |
 |----------|---------|------|
 | **Graviton (ARM) Fargate** | 20-30% | Day 1 — all services run on Alpine/musl |
-| **Fargate Spot** for ai/search | 70% on compute | Day 1 — non-critical services |
+| **Fargate Spot** for ai-service | 70% on compute | Day 1 — non-critical service |
 | **Aurora Serverless v2 min ACU** | Keep at 0.5 | Day 1 — auto-scales up only when needed |
 | **Single Aurora cluster** | ~$43/mo | Day 1 — core_db + payments_db in one cluster |
+| **PG full-text search** | ~$40-350/mo saved | Already done — no OpenSearch needed |
+| **Redis pub/sub** | ~$50-100/mo saved | Already done — no MSK/Kafka needed |
 | **S3 Intelligent-Tiering** | Auto-optimize | Day 1 |
 | **CloudFront Price Class 200** | Skip expensive regions | Day 1 |
 | **Single NAT Gateway** (1 AZ) | $65/mo saved | Until you need multi-AZ HA |
 | **VPC Endpoints** | Reduce NAT data costs 60% | Day 1 — free for S3, cheap for ECR/Secrets |
 | **Fargate Savings Plans** | 20% commit | After 6 months of usage data |
-| **OpenSearch: start managed** | ~$310/mo saved | Use t3.small.search, switch to Serverless at >10K providers |
 | **Right-sizing** (monthly review) | 10-30% | Ongoing — use Compute Optimizer |
 
 ---
@@ -651,7 +633,7 @@ Same Docker images. Same code. Just different connection strings.
 Week 1: Foundation
   ├── VPC, subnets, security groups, NAT (1 AZ)
   ├── VPC Endpoints (S3, ECR, Secrets Manager, CloudWatch)
-  ├── ECR repos (4 services)
+  ├── ECR repos (3 services)
   ├── Secrets Manager secrets
   ├── S3 buckets
   └── Route 53 hosted zone + ACM certificates
@@ -660,14 +642,13 @@ Week 2: Data Layer
   ├── Aurora Serverless v2 cluster (0.5 min ACU)
   │   ├── CREATE DATABASE core_db   (run schema.sql + migrations)
   │   └── CREATE DATABASE payments_db (Rust service auto-migrates)
-  ├── ElastiCache Serverless (Redis)
-  ├── OpenSearch managed domain (t3.small.search)
-  └── MSK Serverless cluster
+  ├── Run migrate-pg-search.sql (materialized view + indexes)
+  └── ElastiCache Serverless (Redis)
 
 Week 3: Compute & Networking
-  ├── ALB + target groups (4 services)
+  ├── ALB + target groups (3 services)
   ├── ECS cluster (Fargate)
-  ├── Task definitions (4 services, min 1 task each)
+  ├── Task definitions (3 services, min 1 task each)
   ├── ECS services with auto-scaling policies
   ├── WAF rules on ALB
   └── Verify auto-scaling works (load test)
@@ -688,11 +669,8 @@ Week 4: Edge & Monitoring
 |-----------|-----|-----|----------|
 | Aurora Serverless v2 | 5 min | < 30s | Multi-AZ auto-failover (built-in) |
 | ElastiCache Serverless | 0 (replicated) | < 1 min | Multi-AZ automatic |
-| OpenSearch | Near-zero | Minutes | Multi-AZ by default |
 | ECS Fargate | N/A | < 2 min | Auto-restart + auto-scale |
-| MSK Serverless | 0 | 0 | Replicated across AZs |
 | S3 | 0 | 0 | 11 nines durability |
-| Kafka (MSK) | 0 | Minutes | Multi-AZ replication |
 
 ### Cross-Region DR (future)
 - RDS cross-region read replica in `ap-southeast-1` (Singapore)

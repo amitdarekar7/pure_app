@@ -12,7 +12,8 @@ import { bookingRoutes } from './routes/bookings'
 import { providerPortalRoutes } from './routes/provider-portal'
 import { promotionRoutes } from './routes/promotions'
 import { eventStreamRoutes } from './routes/events'
-import { indexProviderService } from './search-index'
+import { searchRoutes } from './routes/search'
+import { initSearchIndex } from './search-index'
 
 // ── Startup env validation ───────────────────────────────────────────────────
 const REQUIRED_ENV = ['DATABASE_URL', 'REDIS_URL'] as const
@@ -51,6 +52,7 @@ const app = Fastify({
 // ── Database ────────────────────────────────────────────────────────────────
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
 app.decorate('db', pool)
+initSearchIndex(pool)
 
 // ── Plugins ─────────────────────────────────────────────────────────────────
 app.register(fastifyCors, {
@@ -74,72 +76,19 @@ app.register(bookingRoutes,     { prefix: '/v1/bookings' })
 app.register(providerPortalRoutes, { prefix: '/v1/provider' })
 app.register(promotionRoutes,      { prefix: '/v1/promotions' })
 app.register(eventStreamRoutes,    { prefix: '/v1/events' })
+app.register(searchRoutes,         { prefix: '/v1' })
 
-// ── Admin: bulk-sync all providers → OpenSearch ──────────────────────────────
+// ── Admin: bulk-refresh search materialized view ─────────────────────────────
 // POST /v1/admin/search-sync
 // Protected by a static admin key (ADMIN_KEY env var).
-// Call this once after first deploy to backfill existing providers.
 app.post('/v1/admin/search-sync', async (req, reply) => {
   const key = process.env.ADMIN_KEY
   if (key && req.headers['x-admin-key'] !== key) {
     return reply.status(403).send({ error: 'forbidden' })
   }
 
-  const { rows } = await app.db.query<{
-    provider_id:   string
-    provider_name: string
-    service_id:    string
-    service_title: string
-    category_slug: string
-    address:       string | null
-    city_name:     string
-    area_name:     string | null
-    price_paise:   number
-    duration_mins: number
-    likes_count:   number
-    status:        string
-    is_featured:   boolean
-    is_boosted:    boolean
-    discount_pct:  number
-  }>(`
-    SELECT
-      p.id            AS provider_id,
-      p.name          AS provider_name,
-      ps.id           AS service_id,
-      ps.title        AS service_title,
-      ps.category_slug,
-      p.address,
-      c.name          AS city_name,
-      a.name          AS area_name,
-      ps.price_paise,
-      ps.duration_mins,
-      ps.discount_pct,
-      p.likes_count,
-      p.status,
-      p.is_featured,
-      p.is_boosted
-    FROM   providers p
-    JOIN   provider_services ps ON ps.provider_id = p.id
-    JOIN   cities c             ON c.id = p.city_id
-    LEFT   JOIN areas a         ON a.id = p.area_id
-    WHERE  ps.is_available = true
-  `)
-
-  const now = new Date().toISOString()
-  let indexed = 0
-  for (const row of rows) {
-    const discountedPricePaise = row.discount_pct > 0
-      ? Math.round(row.price_paise * (1 - row.discount_pct / 100))
-      : row.price_paise
-    void indexProviderService({
-      ...row,
-      updated_at: now,
-      discounted_price_paise: discountedPricePaise,
-    })
-    indexed++
-  }
-
-  return reply.send({ queued: indexed })
+  await app.db.query('REFRESH MATERIALIZED VIEW CONCURRENTLY provider_search')
+  return reply.send({ ok: true })
 })
 
 // ── Admin: expire promotions + update provider flags ──────────────────────────
