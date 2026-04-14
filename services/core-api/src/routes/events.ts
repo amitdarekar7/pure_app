@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import Redis from 'ioredis'
 import { getFirebaseAdmin } from '../firebase-admin'
-import { redisChannel } from '../kafka/consumer'
+import { redisChannel } from '../redis-channels'
 
 /**
  * SSE Events Route — /v1/events/stream

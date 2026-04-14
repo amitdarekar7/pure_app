@@ -1,8 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { randomUUID } from 'crypto'
 import { requireAuth } from '../middleware/auth'
-import { publish } from '../kafka/producer'
-import { TOPICS } from '../kafka/topics'
+import { redisChannel } from '../redis-channels'
 import { indexProviderService } from '../search-index'
 import { getSubscriptionStatus, QUARTERLY_PAISE, QUARTERLY_DAYS } from '../subscription'
 import { sendPushNotification } from '../notifications'
@@ -413,10 +412,10 @@ export async function providerPortalRoutes(app: FastifyInstance) {
 
       const booking = updated[0]
 
-      // ── Publish booking.responded event to Kafka (fire-and-forget) ──────
-      publish(TOPICS.BOOKING_RESPONDED, booking.id, {
+      // ── Publish booking.responded via Redis pub/sub (fire-and-forget) ──
+      const event = {
         event_id:       randomUUID(),
-        event_type:     TOPICS.BOOKING_RESPONDED,
+        event_type:     'booking.responded',
         schema_version: '1.0.0',
         timestamp:      new Date().toISOString(),
         aggregate_id:   booking.id,
@@ -430,8 +429,12 @@ export async function providerPortalRoutes(app: FastifyInstance) {
           scheduled_at:  booking.scheduled_at ?? null,
           service_title: booking.service_title ?? null,
         },
-      }).catch((err: Error) =>
-        app.log.error({ err }, '[kafka] Failed to publish booking.responded'),
+      }
+      app.redis.publish(
+        redisChannel.user(booking.user_id),
+        JSON.stringify(event),
+      ).catch((err: Error) =>
+        app.log.error({ err }, '[redis] Failed to publish booking.responded'),
       )
 
       // ── Send FCM push notification to the user (fire-and-forget) ────────

@@ -2,7 +2,6 @@ import 'dotenv/config'
 import Fastify from 'fastify'
 import fastifyCors from '@fastify/cors'
 import fastifyRedis from '@fastify/redis'
-import Redis from 'ioredis'
 import { Pool } from 'pg'
 import { getFirebaseAdmin } from './firebase-admin'
 import { authRoutes, publicAuthRoutes } from './routes/auth'
@@ -13,8 +12,6 @@ import { bookingRoutes } from './routes/bookings'
 import { providerPortalRoutes } from './routes/provider-portal'
 import { promotionRoutes } from './routes/promotions'
 import { eventStreamRoutes } from './routes/events'
-import { connectProducer, disconnectProducer } from './kafka/producer'
-import { startConsumer, stopConsumer } from './kafka/consumer'
 import { indexProviderService } from './search-index'
 
 // ── Startup env validation ───────────────────────────────────────────────────
@@ -236,22 +233,9 @@ app.get('/health', async () => ({
   ts: new Date().toISOString(),
 }))
 
-// ── Kafka: connect producer + start consumer ─────────────────────────────────
-// The consumer needs a dedicated Redis client for pub/sub publishing.
-// It cannot share the one registered with @fastify/redis because that client
-// enters subscribe mode and can no longer issue regular commands.
-const redisPublisher = new Redis(process.env.REDIS_URL!)
-
-async function startKafka(): Promise<void> {
-  try {
-    await connectProducer()
-    app.log.info('[kafka] Producer connected')
-    await startConsumer(redisPublisher)
-    app.log.info('[kafka] Consumer started')
-  } catch (err) {
-    app.log.error({ err }, '[kafka] Failed to start — continuing without real-time events')
-  }
-}
+// ── Kafka removed — real-time events now use Redis pub/sub directly ──────────
+// The @fastify/redis plugin provides app.redis for both pub/sub publishing
+// (in route handlers) and the SSE subscriber (in events.ts).
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 const port = parseInt(process.env.PORT ?? '3000', 10)
@@ -260,17 +244,13 @@ app.listen({ port, host: '0.0.0.0' }, async (err) => {
     app.log.error(err)
     process.exit(1)
   }
-  // Start Kafka after the HTTP server is up so the health-check passes first
-  await startKafka()
 })
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
 const shutdown = async (signal: string) => {
   app.log.info(`[shutdown] ${signal} received`)
   await Promise.allSettled([
-    disconnectProducer(),
-    stopConsumer(),
-    redisPublisher.quit(),
+    app.close(),
   ])
   process.exit(0)
 }

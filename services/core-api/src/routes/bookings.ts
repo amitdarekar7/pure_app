@@ -1,8 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { randomUUID, randomInt } from 'crypto'
 import { requireAuth } from '../middleware/auth'
-import { publish } from '../kafka/producer'
-import { TOPICS } from '../kafka/topics'
+import { redisChannel } from '../redis-channels'
 import { sendPushNotification } from '../notifications'
 
 /** Generate a 6-digit numeric OTP */
@@ -113,10 +112,10 @@ export async function bookingRoutes(app: FastifyInstance) {
 
       const booking = rows[0]
 
-      // ── Publish booking.requested event to Kafka (fire-and-forget) ──────
-      publish(TOPICS.BOOKING_REQUESTED, booking.id, {
+      // ── Publish booking.requested via Redis pub/sub (fire-and-forget) ──
+      const event = {
         event_id:       randomUUID(),
-        event_type:     TOPICS.BOOKING_REQUESTED,
+        event_type:     'booking.requested',
         schema_version: '1.0.0',
         timestamp:      new Date().toISOString(),
         aggregate_id:   booking.id,
@@ -137,8 +136,12 @@ export async function bookingRoutes(app: FastifyInstance) {
           user_name:     uRows[0].display_name ?? null,
           user_phone:    uRows[0].phone ?? null,
         },
-      }).catch((err: Error) =>
-        app.log.error({ err }, '[kafka] Failed to publish booking.requested'),
+      }
+      app.redis.publish(
+        redisChannel.provider(provider_id),
+        JSON.stringify(event),
+      ).catch((err: Error) =>
+        app.log.error({ err }, '[redis] Failed to publish booking.requested'),
       )
 
       // ── Send FCM push notification to the provider (fire-and-forget) ────
