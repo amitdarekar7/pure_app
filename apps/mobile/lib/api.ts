@@ -205,7 +205,7 @@ export const ProviderPortalAPI = {
       p,
     ),
 
-  updateProfile: (p: { name?: string; phone?: string; address?: string; profileImageUrl?: string; panNumber?: string; bankAccountNumber?: string; bankIfsc?: string; bankHolderName?: string; aadhaarLast4?: string; gstNumber?: string }) =>
+  updateProfile: (p: { name?: string; phone?: string; address?: string; profileImageUrl?: string }) =>
     _auth<{ provider: ProviderProfile }>(
       'PATCH',
       `${CORE}/v1/provider/me`,
@@ -214,6 +214,17 @@ export const ProviderPortalAPI = {
 
   deleteMe: () =>
     _auth<{ ok: boolean; message: string }>('DELETE', `${CORE}/v1/provider/me`),
+
+  // ─── Razorpay Route (KYC / Payouts) ───
+  razorpayOnboard: () =>
+    _auth<{ ok: boolean; account_id: string; kyc_status: string; onboarding_url: string | null }>(
+      'POST', `${CORE}/v1/provider/razorpay/onboard`,
+    ),
+
+  razorpayStatus: () =>
+    _auth<{ kyc_status: string; account_id: string | null }>(
+      'GET', `${CORE}/v1/provider/razorpay/status`,
+    ),
 
   // ─── Subscription ───
   subscription: () =>
@@ -466,12 +477,14 @@ export interface BookingSummary {
 }
 
 export interface ProviderProfile {
-  id:                string
-  name:              string
-  address:           string | null
-  phone:             string | null
-  status:            string
-  profile_image_url: string | null
+  id:                    string
+  name:                  string
+  address:               string | null
+  phone:                 string | null
+  status:                string
+  profile_image_url:     string | null
+  razorpay_account_id:   string | null
+  razorpay_kyc_status:   string
 }
 
 export interface ProviderService {
@@ -583,11 +596,12 @@ async function _post<T>(url: string, body: unknown): Promise<T> {
 
 /** Authenticated fetch. Firebase auto-manages token refresh; force-refresh on 401. */
 async function _auth<T>(method: string, url: string, body?: unknown): Promise<T> {
+  const hasBody = body != null
   const doFetch = (token: string) =>
     fetch(url, {
       method,
-      headers: makeHeaders(token),
-      body:    body != null ? JSON.stringify(body) : undefined,
+      headers: hasBody ? makeHeaders(token) : { Authorization: `Bearer ${token}` },
+      body:    hasBody ? JSON.stringify(body) : undefined,
     })
 
   let res = await doFetch(await getIdToken())

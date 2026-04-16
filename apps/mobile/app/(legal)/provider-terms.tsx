@@ -34,8 +34,8 @@ export default function ProviderTermsScreen() {
             You must be at least 18 years old, hold a valid business identity (GST registration if applicable), and possess all licences required for the services you offer under Indian law.
           </Section>
 
-          <Section title="3. Registration & KYC">
-            You must provide accurate business and identity information during registration. This includes your PAN number, bank account details (for payouts), IFSC code, and optionally your GST number and last 4 digits of Aadhaar. Failure to provide valid KYC information may result in payout delays or account suspension.
+          <Section title="3. Registration & Payout Account">
+            You must provide accurate business information during registration. To receive payouts, you must connect a payout account through our payment partner (Razorpay). All identity verification (KYC), bank details, and financial documents are submitted directly to Razorpay — {COMPANY} does not collect or store this information.
           </Section>
 
           <Section title="4. Services & Listings">
@@ -47,7 +47,7 @@ export default function ProviderTermsScreen() {
           </Section>
 
           <Section title="6. Payments & Payouts">
-            Users pay through the platform. Payouts to your registered bank account are processed after service completion, minus the platform commission. You are responsible for all taxes applicable to your earnings, including GST (18%) and TDS (1% u/s 194-O).
+            Users pay through the platform. Payouts to your Razorpay-verified bank account are processed after service completion, minus the platform commission. You are responsible for all taxes applicable to your earnings, including GST (18%) and TDS (1% u/s 194-O). Payout processing is handled by Razorpay under their terms.
           </Section>
 
           <Section title="7. Platform Commission">

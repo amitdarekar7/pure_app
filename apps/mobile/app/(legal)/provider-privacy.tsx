@@ -29,27 +29,26 @@ export default function ProviderPrivacyScreen() {
           <Section title="1. Data We Collect">
             <Text style={s.body}>
               <B>Account data:</B> name, email address, phone number, business name, business address.{'\n'}
-              <B>KYC data:</B> PAN number, bank account number, IFSC code, account holder name, last 4 digits of Aadhaar, GST number (if applicable).{'\n'}
               <B>Business data:</B> service listings, pricing, availability schedule, profile images.{'\n'}
               <B>Transaction data:</B> booking details, payout history, commission records.{'\n'}
-              <B>Usage data:</B> device information, IP address, app analytics, login activity.
+              <B>Usage data:</B> device information, IP address, app analytics, login activity.{'\n'}{'\n'}
+              <B>Important:</B> We do NOT collect or store your KYC data (PAN, bank account, Aadhaar, GST). All identity verification and payout details are submitted directly to and handled by our payment partner, Razorpay. We only store an opaque reference ID.
             </Text>
           </Section>
 
           <Section title="2. Purpose of Processing">
-            We process your data for: identity verification (KYC), payout processing to your bank account, booking management, tax compliance (TDS, GST), fraud prevention, content moderation, customer dispute resolution, and platform improvement.
+            We process your data for: booking management, platform analytics, fraud prevention, content moderation, customer dispute resolution, and platform improvement. Payout processing and identity verification (KYC) are handled entirely by Razorpay under their own privacy policy.
           </Section>
 
           <Section title="3. Lawful Basis (DPDPA)">
-            We collect and process personal data based on your consent provided at registration. KYC data is also collected under legal obligation (RBI guidelines, Income Tax Act). You may withdraw consent by deleting your account, though certain data must be retained for legal compliance.
+            We collect and process personal data based on your consent provided at registration. You may withdraw consent by deleting your account.
           </Section>
 
           <Section title="4. Data Sharing">
             <Text style={s.body}>
               We share your data with:{'\n'}
               {'\u2022'} <B>Customers:</B> your business name, address, service listings, ratings, and profile photo are visible to users.{'\n'}
-              {'\u2022'} <B>Payment processors:</B> bank details shared with our payout partner for processing payouts.{'\n'}
-              {'\u2022'} <B>Tax authorities:</B> PAN, GST, and transaction data as required for TDS compliance.{'\n'}
+              {'\u2022'} <B>Razorpay:</B> basic account info (email, phone, business name) to create your payout account. All KYC documents go directly to Razorpay.{'\n'}
               {'\u2022'} <B>Cloud hosting:</B> AWS for data storage and processing.{'\n'}
               {'\u2022'} <B>Law enforcement:</B> when legally required.{'\n\n'}
               We do not sell your personal data.
@@ -59,8 +58,8 @@ export default function ProviderPrivacyScreen() {
           <Section title="5. Data Retention">
             <Text style={s.body}>
               {'\u2022'} <B>Account data:</B> retained while your account is active.{'\n'}
-              {'\u2022'} <B>KYC & financial records:</B> retained for 7 years after account closure as required by Indian tax law.{'\n'}
-              {'\u2022'} <B>After deletion:</B> non-financial personal data is anonymised within 30 days.
+              {'\u2022'} <B>After deletion:</B> personal data is anonymised within 30 days.{'\n'}
+              {'\u2022'} <B>KYC/financial records:</B> held by Razorpay under their retention policy (typically 7 years per Indian tax law). We do not retain these.
             </Text>
           </Section>
 
@@ -75,7 +74,7 @@ export default function ProviderPrivacyScreen() {
           </Section>
 
           <Section title="7. KYC Data Security">
-            KYC data (PAN, bank account) is encrypted at rest and in transit. Access is restricted to authorised personnel only. We store only the last 4 digits of Aadhaar — never the full number. Bank account numbers are masked in the UI after entry.
+            We do not store any KYC data. Your PAN, bank account, Aadhaar, and GST details are submitted directly to Razorpay via their secure onboarding flow. Razorpay is PCI-DSS Level 1 certified and RBI-licensed. We only store an opaque Razorpay account reference ID.
           </Section>
 
           <Section title="8. Data Security">

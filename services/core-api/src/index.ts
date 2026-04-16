@@ -13,6 +13,7 @@ import { providerPortalRoutes } from './routes/provider-portal'
 import { promotionRoutes } from './routes/promotions'
 import { eventStreamRoutes } from './routes/events'
 import { searchRoutes } from './routes/search'
+import { webhookRoutes } from './routes/webhooks'
 import { initSearchIndex } from './search-index'
 
 // ── Startup env validation ───────────────────────────────────────────────────
@@ -77,6 +78,7 @@ app.register(providerPortalRoutes, { prefix: '/v1/provider' })
 app.register(promotionRoutes,      { prefix: '/v1/promotions' })
 app.register(eventStreamRoutes,    { prefix: '/v1/events' })
 app.register(searchRoutes,         { prefix: '/v1' })
+app.register(webhookRoutes,        { prefix: '/v1/webhooks' })
 
 // ── Admin: bulk-refresh search materialized view ─────────────────────────────
 // POST /v1/admin/search-sync

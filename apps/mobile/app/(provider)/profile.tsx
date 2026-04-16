@@ -2,6 +2,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -36,42 +37,14 @@ export default function ProviderProfileScreen() {
   const [uploading, setUploading] = useState(false)
   const [localImage, setLocalImage] = useState<string | null>(null)
 
-  // KYC fields
-  const [panNumber,        setPanNumber]        = useState(providerProfile?.pan_number ?? '')
-  const [bankAccountNumber,setBankAccountNumber]= useState(providerProfile?.bank_account_number ?? '')
-  const [bankIfsc,         setBankIfsc]         = useState(providerProfile?.bank_ifsc ?? '')
-  const [bankHolderName,   setBankHolderName]   = useState(providerProfile?.bank_holder_name ?? '')
-  const [aadhaarLast4,     setAadhaarLast4]     = useState(providerProfile?.aadhaar_last4 ?? '')
-  const [gstNumber,        setGstNumber]        = useState(providerProfile?.gst_number ?? '')
-  const [kycSaving,        setKycSaving]        = useState(false)
-  const [kycSaved,         setKycSaved]         = useState(false)
-  const [kycError,         setKycError]         = useState<string | null>(null)
-  const [kycTouched,       setKycTouched]       = useState<Record<string, boolean>>({})
+  // Razorpay payout account
+  const [rzpLoading,  setRzpLoading]  = useState(false)
+  const [rzpError,    setRzpError]    = useState<string | null>(null)
   const [confirmDelete,    setConfirmDelete]    = useState(false)
   const [deleting,         setDeleting]         = useState(false)
 
-  // ---------- KYC inline validation ----------
-  const PAN_RE  = /^[A-Z]{5}[0-9]{4}[A-Z]$/
-  const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/
-  const GST_RE  = /^\d{2}[A-Z]{5}\d{4}[A-Z]\d[Z][A-Z0-9]$/
-  const ACCT_RE = /^\d{9,18}$/
-  const NAME_RE = /^[A-Za-z\s.'-]{2,}$/
-
-  const kycErrors: Record<string, string | null> = {
-    pan:    panNumber.trim()        ? (PAN_RE.test(panNumber.trim().toUpperCase())         ? null : 'Invalid PAN — format: ABCDE1234F')       : 'PAN is required',
-    bank:   bankAccountNumber.trim()? (ACCT_RE.test(bankAccountNumber.trim())              ? null : 'Must be 9–18 digits')                    : 'Bank account is required',
-    ifsc:   bankIfsc.trim()         ? (IFSC_RE.test(bankIfsc.trim().toUpperCase())         ? null : 'Invalid IFSC — format: SBIN0001234')     : 'IFSC is required',
-    holder: bankHolderName.trim()   ? (NAME_RE.test(bankHolderName.trim())                 ? null : 'Letters, spaces, dots and hyphens only') : 'Holder name is required',
-    aadhaar:aadhaarLast4.trim()     ? (/^\d{4}$/.test(aadhaarLast4.trim())                 ? null : 'Must be exactly 4 digits')               : null, // optional
-    gst:    gstNumber.trim()        ? (GST_RE.test(gstNumber.trim().toUpperCase())         ? null : 'Invalid GST — format: 22AAAAA0000A1Z5')  : null, // optional
-  }
-
-  const kycHasErrors = Object.entries(kycErrors).some(([, v]) => v !== null)
-
-  function touchField(field: string) {
-    setKycTouched(prev => ({ ...prev, [field]: true }))
-  }
-  // ---------- end KYC validation ----------
+  const rzpStatus    = providerProfile?.razorpay_kyc_status ?? 'not_connected'
+  const rzpAccountId = providerProfile?.razorpay_account_id ?? null
 
   const email = providerUser?.email ?? ''
   const initial = (providerProfile?.name ?? email ?? 'P')[0].toUpperCase()
@@ -178,33 +151,33 @@ export default function ProviderProfileScreen() {
     }
   }
 
-  async function handleSaveKyc() {
-    // Touch all fields so errors show
-    setKycTouched({ pan: true, bank: true, ifsc: true, holder: true, aadhaar: true, gst: true })
-    if (kycHasErrors) {
-      setKycError('Please fix the highlighted fields before saving')
-      return
-    }
-    setKycSaving(true)
-    setKycSaved(false)
-    setKycError(null)
+  async function handleRazorpayOnboard() {
+    setRzpLoading(true)
+    setRzpError(null)
     try {
-      await ProviderPortalAPI.updateProfile({
-        panNumber:        panNumber.trim() || undefined,
-        bankAccountNumber:bankAccountNumber.trim() || undefined,
-        bankIfsc:         bankIfsc.trim() || undefined,
-        bankHolderName:   bankHolderName.trim() || undefined,
-        aadhaarLast4:     aadhaarLast4.trim() || undefined,
-        gstNumber:        gstNumber.trim() || undefined,
-      })
+      const res = await ProviderPortalAPI.razorpayOnboard()
       await refreshProfile()
-      setKycSaved(true)
-      setTimeout(() => setKycSaved(false), 3000)
+      if (res.onboarding_url) {
+        Linking.openURL(res.onboarding_url)
+      }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to save KYC details'
-      setKycError(msg)
+      const msg = err instanceof Error ? err.message : 'Failed to start onboarding'
+      setRzpError(msg)
     } finally {
-      setKycSaving(false)
+      setRzpLoading(false)
+    }
+  }
+
+  async function handleRefreshRzpStatus() {
+    setRzpLoading(true)
+    setRzpError(null)
+    try {
+      await ProviderPortalAPI.razorpayStatus()
+      await refreshProfile()
+    } catch {
+      // silently fail — status stays as cached
+    } finally {
+      setRzpLoading(false)
     }
   }
 
@@ -342,109 +315,57 @@ export default function ProviderProfileScreen() {
             </Pressable>
           </View>
 
-          {/* KYC / Compliance Details */}
+          {/* Payout Account — Razorpay Route */}
           <View style={styles.formCard}>
-            <Text style={styles.formTitle}>🏦 KYC & Bank Details</Text>
-            <Text style={styles.formSub}>Required for payouts and compliance</Text>
+            <Text style={styles.formTitle}>💳 Payout Account</Text>
+            <Text style={styles.formSub}>
+              Payouts are handled securely by Razorpay. Your bank details and KYC documents are submitted directly to Razorpay — we never see or store them.
+            </Text>
 
-            <Text style={styles.fieldLabel}>PAN Number *</Text>
-            <TextInput
-              style={[styles.input, kycTouched.pan && kycErrors.pan ? styles.inputError : null]}
-              value={panNumber}
-              onChangeText={v => { setPanNumber(v.toUpperCase()); touchField('pan') }}
-              onBlur={() => touchField('pan')}
-              placeholder="ABCDE1234F"
-              placeholderTextColor="#9CA3AF"
-              autoCapitalize="characters"
-              maxLength={10}
-            />
-            {kycTouched.pan && kycErrors.pan && <Text style={styles.fieldError}>{kycErrors.pan}</Text>}
+            {/* Status badge */}
+            <View style={[styles.rzpStatusBadge, rzpStatusStyle(rzpStatus)]}>
+              <Text style={styles.rzpStatusIcon}>{rzpStatusIcon(rzpStatus)}</Text>
+              <View>
+                <Text style={[styles.rzpStatusLabel, { color: rzpStatusColor(rzpStatus) }]}>{rzpStatusLabel(rzpStatus)}</Text>
+                <Text style={styles.rzpStatusHint}>{rzpStatusHint(rzpStatus)}</Text>
+              </View>
+            </View>
 
-            <Text style={styles.fieldLabel}>Bank Account Number *</Text>
-            <TextInput
-              style={[styles.input, kycTouched.bank && kycErrors.bank ? styles.inputError : null]}
-              value={bankAccountNumber}
-              onChangeText={v => { setBankAccountNumber(v.replace(/\D/g, '')); touchField('bank') }}
-              onBlur={() => touchField('bank')}
-              placeholder="e.g. 1234567890123"
-              placeholderTextColor="#9CA3AF"
-              keyboardType="number-pad"
-              maxLength={18}
-            />
-            {kycTouched.bank && kycErrors.bank && <Text style={styles.fieldError}>{kycErrors.bank}</Text>}
-
-            <Text style={styles.fieldLabel}>Bank IFSC Code *</Text>
-            <TextInput
-              style={[styles.input, kycTouched.ifsc && kycErrors.ifsc ? styles.inputError : null]}
-              value={bankIfsc}
-              onChangeText={v => { setBankIfsc(v.toUpperCase()); touchField('ifsc') }}
-              onBlur={() => touchField('ifsc')}
-              placeholder="e.g. SBIN0001234"
-              placeholderTextColor="#9CA3AF"
-              autoCapitalize="characters"
-              maxLength={11}
-            />
-            {kycTouched.ifsc && kycErrors.ifsc && <Text style={styles.fieldError}>{kycErrors.ifsc}</Text>}
-
-            <Text style={styles.fieldLabel}>Account Holder Name *</Text>
-            <TextInput
-              style={[styles.input, kycTouched.holder && kycErrors.holder ? styles.inputError : null]}
-              value={bankHolderName}
-              onChangeText={v => { setBankHolderName(v); touchField('holder') }}
-              onBlur={() => touchField('holder')}
-              placeholder="Name as on bank account"
-              placeholderTextColor="#9CA3AF"
-            />
-            {kycTouched.holder && kycErrors.holder && <Text style={styles.fieldError}>{kycErrors.holder}</Text>}
-
-            <Text style={styles.fieldLabel}>Aadhaar Last 4 Digits</Text>
-            <TextInput
-              style={[styles.input, kycTouched.aadhaar && kycErrors.aadhaar ? styles.inputError : null]}
-              value={aadhaarLast4}
-              onChangeText={v => { setAadhaarLast4(v.replace(/\D/g, '')); touchField('aadhaar') }}
-              onBlur={() => touchField('aadhaar')}
-              placeholder="1234"
-              placeholderTextColor="#9CA3AF"
-              keyboardType="number-pad"
-              maxLength={4}
-            />
-            {kycTouched.aadhaar && kycErrors.aadhaar && <Text style={styles.fieldError}>{kycErrors.aadhaar}</Text>}
-
-            <Text style={styles.fieldLabel}>GST Number</Text>
-            <TextInput
-              style={[styles.input, kycTouched.gst && kycErrors.gst ? styles.inputError : null]}
-              value={gstNumber}
-              onChangeText={v => { setGstNumber(v.toUpperCase()); touchField('gst') }}
-              onBlur={() => touchField('gst')}
-              placeholder="22AAAAA0000A1Z5 (optional)"
-              placeholderTextColor="#9CA3AF"
-              autoCapitalize="characters"
-              maxLength={15}
-            />
-            {kycTouched.gst && kycErrors.gst && <Text style={styles.fieldError}>{kycErrors.gst}</Text>}
-
-            {kycError && (
+            {rzpError && (
               <View style={styles.errorBanner}>
-                <Text style={styles.errorText}>{kycError}</Text>
+                <Text style={styles.errorText}>{rzpError}</Text>
               </View>
             )}
 
-            {kycSaved && (
-              <View style={styles.successBanner}>
-                <Text style={styles.successText}>✅ KYC details saved!</Text>
-              </View>
+            {rzpStatus === 'not_connected' && (
+              <Pressable
+                style={[styles.saveBtn, rzpLoading && styles.saveBtnDisabled]}
+                onPress={handleRazorpayOnboard}
+                disabled={rzpLoading}
+              >
+                {rzpLoading
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={styles.saveBtnText}>Connect Payout Account</Text>}
+              </Pressable>
             )}
 
-            <Pressable
-              style={[styles.saveBtn, kycSaving && styles.saveBtnDisabled]}
-              onPress={handleSaveKyc}
-              disabled={kycSaving}
-            >
-              {kycSaving
-                ? <ActivityIndicator size="small" color="#fff" />
-                : <Text style={styles.saveBtnText}>Save KYC Details</Text>
-              }
-            </Pressable>
+            {(rzpStatus === 'pending' || rzpStatus === 'under_review') && (
+              <Pressable
+                style={[styles.rzpRefreshBtn, rzpLoading && { opacity: 0.5 }]}
+                onPress={handleRefreshRzpStatus}
+                disabled={rzpLoading}
+              >
+                {rzpLoading
+                  ? <ActivityIndicator size="small" color={ACCENT} />
+                  : <Text style={styles.rzpRefreshText}>↻ Refresh Status</Text>}
+              </Pressable>
+            )}
+
+            {rzpStatus === 'activated' && rzpAccountId && (
+              <View style={styles.rzpConnectedInfo}>
+                <Text style={styles.rzpConnectedId}>Account: {rzpAccountId.slice(0, 8)}…{rzpAccountId.slice(-4)}</Text>
+              </View>
+            )}
           </View>
 
           {/* Danger zone */}
@@ -501,6 +422,62 @@ export default function ProviderProfileScreen() {
         </View>
     </ScrollView>
   )
+}
+
+/* ── Razorpay status helpers ── */
+function rzpStatusLabel(s: string) {
+  switch (s) {
+    case 'not_connected': return 'Not Connected'
+    case 'pending':       return 'Pending Verification'
+    case 'under_review':  return 'Under Review'
+    case 'activated':     return 'Verified & Active'
+    case 'suspended':     return 'Suspended'
+    case 'rejected':      return 'Rejected'
+    default:              return 'Unknown'
+  }
+}
+function rzpStatusHint(s: string) {
+  switch (s) {
+    case 'not_connected': return 'Connect your account to receive payouts'
+    case 'pending':       return 'Complete KYC on Razorpay to get verified'
+    case 'under_review':  return 'Razorpay is reviewing your documents'
+    case 'activated':     return 'You can receive payouts'
+    case 'suspended':     return 'Contact support for assistance'
+    case 'rejected':      return 'Re-submit your details on Razorpay'
+    default:              return ''
+  }
+}
+function rzpStatusIcon(s: string) {
+  switch (s) {
+    case 'not_connected': return '🔗'
+    case 'pending':       return '⏳'
+    case 'under_review':  return '🔍'
+    case 'activated':     return '✅'
+    case 'suspended':     return '⚠️'
+    case 'rejected':      return '❌'
+    default:              return '❓'
+  }
+}
+function rzpStatusColor(s: string) {
+  switch (s) {
+    case 'not_connected': return '#6B7280'
+    case 'pending':       return '#D97706'
+    case 'under_review':  return '#2563EB'
+    case 'activated':     return '#059669'
+    case 'suspended':     return '#DC2626'
+    case 'rejected':      return '#DC2626'
+    default:              return '#6B7280'
+  }
+}
+function rzpStatusStyle(s: string) {
+  switch (s) {
+    case 'activated':  return { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }
+    case 'pending':    return { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }
+    case 'under_review': return { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }
+    case 'suspended':
+    case 'rejected':   return { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }
+    default:           return { backgroundColor: '#F9FAFB', borderColor: '#E5E7EB' }
+  }
 }
 
 const styles = StyleSheet.create({
@@ -702,6 +679,27 @@ const styles = StyleSheet.create({
   },
   saveBtnDisabled: { opacity: 0.5 },
   saveBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+
+  // Razorpay payout card
+  rzpStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    marginBottom: 14,
+  },
+  rzpStatusIcon:  { fontSize: 22 },
+  rzpStatusLabel: { fontSize: 14, fontWeight: '800' },
+  rzpStatusHint:  { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  rzpRefreshBtn: {
+    borderWidth: 1, borderColor: ACCENT, borderRadius: 12,
+    paddingVertical: 12, alignItems: 'center', marginTop: 4,
+  },
+  rzpRefreshText: { color: ACCENT, fontWeight: '700', fontSize: 14 },
+  rzpConnectedInfo: { marginTop: 4 },
+  rzpConnectedId: { fontSize: 12, color: '#6B7280', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
 
   // Danger zone
   dangerCard: {

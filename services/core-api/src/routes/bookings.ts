@@ -571,11 +571,18 @@ export async function bookingRoutes(app: FastifyInstance) {
       )
       if (!uRows[0]) return reply.status(401).send({ error: 'user not found' })
 
-      // Fetch booking
+      // Fetch booking + provider Route account for split payment
       const { rows: bRows } = await app.db.query<{
-        id: string; user_id: string; payment_status: string
+        id: string; user_id: string; payment_status: string;
+        provider_id: string; provider_paise: number; commission_paise: number;
+        razorpay_account_id: string | null; razorpay_kyc_status: string;
       }>(
-        `SELECT id, user_id, payment_status FROM bookings WHERE id = $1`,
+        `SELECT b.id, b.user_id, b.payment_status,
+                b.provider_id, b.provider_paise, b.commission_paise,
+                p.razorpay_account_id, p.razorpay_kyc_status
+           FROM bookings b
+           JOIN providers p ON p.id = b.provider_id
+          WHERE b.id = $1`,
         [id],
       )
       if (!bRows[0]) return reply.status(404).send({ error: 'booking not found' })
@@ -616,6 +623,77 @@ export async function bookingRoutes(app: FastifyInstance) {
           RETURNING id, payment_status`,
         [id, razorpay_payment_id],
       )
+
+      // ── Razorpay Route: split payment to provider ───────────────────────
+      const bk = bRows[0]
+      if (bk.razorpay_account_id && bk.razorpay_kyc_status === 'activated' && bk.provider_paise > 0) {
+        // Transfer provider's share to their linked account; commission stays in ours
+        const RZP_KEY    = process.env.RAZORPAY_KEY_ID!
+        const RZP_SECRET = process.env.RAZORPAY_KEY_SECRET!
+        const auth       = Buffer.from(`${RZP_KEY}:${RZP_SECRET}`).toString('base64')
+
+        try {
+          const transferResp = await fetch(`https://api.razorpay.com/v1/payments/${razorpay_payment_id}/transfers`, {
+            method: 'POST',
+            headers: {
+              'Content-Type':  'application/json',
+              'Authorization': `Basic ${auth}`,
+            },
+            body: JSON.stringify({
+              transfers: [{
+                account:  bk.razorpay_account_id,
+                amount:   bk.provider_paise,
+                currency: 'INR',
+                notes: {
+                  booking_id:  id,
+                  provider_id: bk.provider_id,
+                  purpose:     'service_payout',
+                },
+                on_hold: 0,
+              }],
+            }),
+          })
+
+          if (transferResp.ok) {
+            const transferData = await transferResp.json() as { items?: Array<{ id: string }> }
+            const transferId   = transferData.items?.[0]?.id ?? null
+
+            await app.db.query(
+              `UPDATE bookings
+                  SET settlement_status = 'transferred',
+                      razorpay_transfer_id = $2,
+                      updated_at = NOW()
+                WHERE id = $1`,
+              [id, transferId],
+            )
+            app.log.info(`Route transfer ${transferId} created for booking ${id}: ₹${bk.provider_paise / 100} → ${bk.razorpay_account_id}`)
+          } else {
+            const errBody = await transferResp.text()
+            app.log.error(`Route transfer failed for booking ${id}: ${errBody}`)
+            // Payment is still valid — mark settlement as failed for retry later
+            await app.db.query(
+              `UPDATE bookings SET settlement_status = 'failed', updated_at = NOW() WHERE id = $1`,
+              [id],
+            )
+          }
+        } catch (err) {
+          app.log.error(`Route transfer error for booking ${id}: ${err}`)
+          await app.db.query(
+            `UPDATE bookings SET settlement_status = 'failed', updated_at = NOW() WHERE id = $1`,
+            [id],
+          )
+        }
+      } else {
+        // Provider not on Route or KYC not activated — mark as not_applicable
+        const reason = !bk.razorpay_account_id ? 'no_route_account'
+                     : bk.razorpay_kyc_status !== 'activated' ? `kyc_${bk.razorpay_kyc_status}`
+                     : 'zero_payout'
+        await app.db.query(
+          `UPDATE bookings SET settlement_status = 'not_applicable', updated_at = NOW() WHERE id = $1`,
+          [id],
+        )
+        app.log.info(`Skipping Route transfer for booking ${id}: ${reason}`)
+      }
 
       return reply.send({
         booking: {

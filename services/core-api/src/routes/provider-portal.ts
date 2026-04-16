@@ -177,21 +177,17 @@ export async function providerPortalRoutes(app: FastifyInstance) {
       if (!ctx) return
 
       const { rows: pRows } = await app.db.query<{
-        id:                string
-        name:              string
-        address:           string | null
-        phone:             string | null
-        status:            string
-        profile_image_url: string | null
-        pan_number:        string | null
-        bank_account_number: string | null
-        bank_ifsc:         string | null
-        bank_holder_name:  string | null
-        aadhaar_last4:     string | null
-        gst_number:        string | null
+        id:                  string
+        name:                string
+        address:             string | null
+        phone:               string | null
+        status:              string
+        profile_image_url:   string | null
+        razorpay_account_id: string | null
+        razorpay_kyc_status: string
       }>(
         `SELECT id, name, address, phone, status, profile_image_url,
-                pan_number, bank_account_number, bank_ifsc, bank_holder_name, aadhaar_last4, gst_number
+                razorpay_account_id, razorpay_kyc_status
            FROM providers WHERE id = $1`,
         [ctx.providerId],
       )
@@ -236,14 +232,14 @@ export async function providerPortalRoutes(app: FastifyInstance) {
   // ─────────────────────────────────────────────────────────────────────────
   // PATCH /v1/provider/me — update provider profile (name, phone, address)
   // ─────────────────────────────────────────────────────────────────────────
-  app.patch<{ Body: { name?: string; phone?: string; address?: string; profileImageUrl?: string; panNumber?: string; bankAccountNumber?: string; bankIfsc?: string; bankHolderName?: string; aadhaarLast4?: string; gstNumber?: string } }>(
+  app.patch<{ Body: { name?: string; phone?: string; address?: string; profileImageUrl?: string } }>(
     '/me',
     { preHandler: requireAuth },
     async (req, reply) => {
       const ctx = await requireProviderAuth(app, req, reply)
       if (!ctx) return
 
-      const { name, phone, address, profileImageUrl, panNumber, bankAccountNumber, bankIfsc, bankHolderName, aadhaarLast4, gstNumber } = req.body ?? {}
+      const { name, phone, address, profileImageUrl } = req.body ?? {}
 
       const flagged = checkTextFields({ name, address })
       if (flagged) return reply.status(400).send({ error: `${flagged} contains inappropriate language` })
@@ -282,42 +278,7 @@ export async function providerPortalRoutes(app: FastifyInstance) {
         sets.push(`profile_image_url = $${idx++}`)
         vals.push(profileImageUrl?.trim() || null)
       }
-      if (panNumber !== undefined) {
-        if (panNumber && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panNumber.trim().toUpperCase()))
-          return reply.status(400).send({ error: 'Invalid PAN format (e.g. ABCDE1234F)' })
-        sets.push(`pan_number = $${idx++}`)
-        vals.push(panNumber?.trim().toUpperCase() || null)
-      }
-      if (bankAccountNumber !== undefined) {
-        if (bankAccountNumber && !/^\d{9,18}$/.test(bankAccountNumber.trim()))
-          return reply.status(400).send({ error: 'Bank account number must be 9–18 digits' })
-        sets.push(`bank_account_number = $${idx++}`)
-        vals.push(bankAccountNumber?.trim() || null)
-      }
-      if (bankIfsc !== undefined) {
-        if (bankIfsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(bankIfsc.trim().toUpperCase()))
-          return reply.status(400).send({ error: 'Invalid IFSC format (e.g. SBIN0001234)' })
-        sets.push(`bank_ifsc = $${idx++}`)
-        vals.push(bankIfsc?.trim().toUpperCase() || null)
-      }
-      if (bankHolderName !== undefined) {
-        if (bankHolderName && (bankHolderName.trim().length < 2 || !/^[A-Za-z\s.'\-]+$/.test(bankHolderName.trim())))
-          return reply.status(400).send({ error: 'Holder name must be at least 2 characters (letters, spaces, dots, hyphens only)' })
-        sets.push(`bank_holder_name = $${idx++}`)
-        vals.push(bankHolderName?.trim() || null)
-      }
-      if (aadhaarLast4 !== undefined) {
-        if (aadhaarLast4 && !/^\d{4}$/.test(aadhaarLast4.trim()))
-          return reply.status(400).send({ error: 'Aadhaar last 4 must be exactly 4 digits' })
-        sets.push(`aadhaar_last4 = $${idx++}`)
-        vals.push(aadhaarLast4?.trim() || null)
-      }
-      if (gstNumber !== undefined) {
-        if (gstNumber && !/^\d{2}[A-Z]{5}\d{4}[A-Z]\d[Z][A-Z0-9]$/.test(gstNumber.trim().toUpperCase()))
-          return reply.status(400).send({ error: 'Invalid GST format' })
-        sets.push(`gst_number = $${idx++}`)
-        vals.push(gstNumber?.trim().toUpperCase() || null)
-      }
+
 
       if (sets.length === 0) return reply.status(400).send({ error: 'No fields to update' })
 
@@ -325,10 +286,10 @@ export async function providerPortalRoutes(app: FastifyInstance) {
       vals.push(ctx.providerId)
 
       const { rows } = await app.db.query<{
-        id: string; name: string; address: string | null; phone: string | null; status: string; profile_image_url: string | null
+        id: string; name: string; address: string | null; phone: string | null; status: string; profile_image_url: string | null; razorpay_account_id: string | null; razorpay_kyc_status: string
       }>(
         `UPDATE providers SET ${sets.join(', ')} WHERE id = $${idx}
-         RETURNING id, name, address, phone, status, profile_image_url, pan_number, bank_account_number, bank_ifsc, bank_holder_name, aadhaar_last4, gst_number`,
+         RETURNING id, name, address, phone, status, profile_image_url, razorpay_account_id, razorpay_kyc_status`,
         vals,
       )
 
@@ -1108,6 +1069,162 @@ export async function providerPortalRoutes(app: FastifyInstance) {
       client.release()
     }
 
-    return reply.status(200).send({ ok: true, message: 'Account deleted. Your data has been anonymised. KYC records retained per legal obligation.' })
+    return reply.status(200).send({ ok: true, message: 'Account deleted. Your data has been anonymised.' })
+  })
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // POST /v1/provider/razorpay/onboard — Create Razorpay Route linked account
+  // and return the onboarding URL for the provider to complete KYC on Razorpay
+  // ─────────────────────────────────────────────────────────────────────────
+  app.post('/razorpay/onboard', { preHandler: requireAuth }, async (req, reply) => {
+    const ctx = await requireProviderAuth(app, req, reply)
+    if (!ctx) return
+
+    // Check if already connected
+    const { rows: existing } = await app.db.query<{ razorpay_account_id: string | null }>(
+      `SELECT razorpay_account_id FROM providers WHERE id = $1`,
+      [ctx.providerId],
+    )
+    if (existing[0]?.razorpay_account_id) {
+      return reply.status(400).send({ error: 'Razorpay account already linked. Use the dashboard link to update your details.' })
+    }
+
+    // Get provider + user info for the Route account
+    const { rows: provRows } = await app.db.query<{ name: string; phone: string | null; email: string }>(
+      `SELECT p.name, p.phone, u.email
+         FROM providers p
+         JOIN provider_accounts pa ON pa.provider_id = p.id
+         JOIN users u ON u.id = pa.user_id
+        WHERE p.id = $1`,
+      [ctx.providerId],
+    )
+    if (!provRows[0]) return reply.status(404).send({ error: 'Provider not found' })
+    const prov = provRows[0]
+
+    const RZP_KEY    = process.env.RAZORPAY_KEY_ID!
+    const RZP_SECRET = process.env.RAZORPAY_KEY_SECRET!
+    const auth       = Buffer.from(`${RZP_KEY}:${RZP_SECRET}`).toString('base64')
+
+    // Step 1: Create linked account via Razorpay Route API
+    const accountResp = await fetch('https://api.razorpay.com/v2/accounts', {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Basic ${auth}`,
+      },
+      body: JSON.stringify({
+        email:         prov.email,
+        phone:         prov.phone ?? undefined,
+        type:          'route',
+        legal_business_name: prov.name,
+        business_type: 'individual',
+        legal_info:    { pan: undefined, gst: undefined },   // provider fills on Razorpay
+        profile:       { category: 'healthcare', subcategory: 'clinic', addresses: { registered: {} } },
+      }),
+    })
+
+    if (!accountResp.ok) {
+      const errBody = await accountResp.text()
+      app.log.error(`Razorpay account creation failed: ${errBody}`)
+      return reply.status(502).send({ error: 'Failed to create Razorpay account. Please try again.' })
+    }
+
+    const accountData = (await accountResp.json()) as { id: string }
+    const accountId   = accountData.id   // e.g. acc_Hx12345abcde
+
+    // Step 2: Create Account Link (stakeholder + KYC onboarding form)
+    const linkResp = await fetch(`https://api.razorpay.com/v2/accounts/${accountId}/products`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Basic ${auth}`,
+      },
+      body: JSON.stringify({
+        product_name:  'route',
+        requested_at:  Math.floor(Date.now() / 1000),
+      }),
+    })
+
+    let onboardingUrl: string | null = null
+    if (linkResp.ok) {
+      const linkData = (await linkResp.json()) as { id: string; requested_at?: number }
+      // The product config activation form URL
+      onboardingUrl = `https://dashboard.razorpay.com/app/route/accounts/${accountId}`
+    }
+
+    // Save to DB
+    await app.db.query(
+      `UPDATE providers
+         SET razorpay_account_id = $2,
+             razorpay_kyc_status = 'pending',
+             updated_at          = NOW()
+       WHERE id = $1`,
+      [ctx.providerId, accountId],
+    )
+
+    return reply.send({
+      ok:             true,
+      account_id:     accountId,
+      kyc_status:     'pending',
+      onboarding_url: onboardingUrl,
+    })
+  })
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // GET /v1/provider/razorpay/status — check current Razorpay KYC status
+  // Fetches the latest status from Razorpay API and syncs to our DB
+  // ─────────────────────────────────────────────────────────────────────────
+  app.get('/razorpay/status', { preHandler: requireAuth }, async (req, reply) => {
+    const ctx = await requireProviderAuth(app, req, reply)
+    if (!ctx) return
+
+    const { rows } = await app.db.query<{ razorpay_account_id: string | null; razorpay_kyc_status: string }>(
+      `SELECT razorpay_account_id, razorpay_kyc_status FROM providers WHERE id = $1`,
+      [ctx.providerId],
+    )
+    const provider = rows[0]
+    if (!provider?.razorpay_account_id) {
+      return reply.send({ kyc_status: 'not_connected', account_id: null })
+    }
+
+    // Fetch fresh status from Razorpay
+    const RZP_KEY    = process.env.RAZORPAY_KEY_ID!
+    const RZP_SECRET = process.env.RAZORPAY_KEY_SECRET!
+    const auth       = Buffer.from(`${RZP_KEY}:${RZP_SECRET}`).toString('base64')
+
+    try {
+      const resp = await fetch(`https://api.razorpay.com/v2/accounts/${provider.razorpay_account_id}`, {
+        headers: { 'Authorization': `Basic ${auth}` },
+      })
+      if (resp.ok) {
+        const data = (await resp.json()) as { status: string }
+        // Razorpay statuses: created, activated, needs_clarification, under_review, suspended
+        const statusMap: Record<string, string> = {
+          created:             'pending',
+          needs_clarification: 'pending',
+          under_review:        'under_review',
+          activated:           'activated',
+          suspended:           'suspended',
+        }
+        const newStatus = statusMap[data.status] ?? 'pending'
+        if (newStatus !== provider.razorpay_kyc_status) {
+          await app.db.query(
+            `UPDATE providers SET razorpay_kyc_status = $2, updated_at = NOW() WHERE id = $1`,
+            [ctx.providerId, newStatus],
+          )
+        }
+        return reply.send({
+          kyc_status: newStatus,
+          account_id: provider.razorpay_account_id,
+        })
+      }
+    } catch (err) {
+      app.log.error(`Razorpay status check failed: ${err}`)
+    }
+
+    return reply.send({
+      kyc_status: provider.razorpay_kyc_status,
+      account_id: provider.razorpay_account_id,
+    })
   })
 }
