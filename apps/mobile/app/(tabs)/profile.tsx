@@ -39,6 +39,8 @@ export default function ProfileScreen() {
   const [error,         setError]         = useState<string | null>(null)
   const [success,       setSuccess]       = useState(false)
   const [confirmLogout, setConfirmLogout] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting,      setDeleting]      = useState(false)
 
   const [name,            setName]            = useState(user?.display_name ?? '')
   const [phone,           setPhone]           = useState(user?.phone ?? '')
@@ -280,6 +282,38 @@ export default function ProfileScreen() {
     router.replace('/(auth)/login')
   }
 
+  async function handleDeleteAccount() {
+    if (Platform.OS === 'web') {
+      setConfirmDelete(true)
+    } else {
+      Alert.alert(
+        'Delete Account',
+        'This will permanently delete your account and anonymise all your data. This action cannot be undone.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: doDeleteAccount,
+          },
+        ],
+      )
+    }
+  }
+
+  async function doDeleteAccount() {
+    setConfirmDelete(false)
+    setDeleting(true)
+    try {
+      await UsersAPI.deleteMe()
+      await logout()
+      router.replace('/(auth)/login')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to delete account')
+      setDeleting(false)
+    }
+  }
+
   const firstName = user?.display_name
     ? user.display_name.split(' ')[0]
     : (user?.email ?? 'User').split('@')[0]
@@ -469,6 +503,47 @@ export default function ProfileScreen() {
           </View>
         )}
 
+        {/* Delete Account */}
+        {!editing && !confirmLogout && !confirmDelete && (
+          <TouchableOpacity style={styles.deleteBtn} onPress={handleDeleteAccount} activeOpacity={0.7} disabled={deleting}>
+            {deleting
+              ? <ActivityIndicator color="#DC2626" size="small" />
+              : <Text style={styles.deleteBtnText}>Delete My Account</Text>}
+          </TouchableOpacity>
+        )}
+
+        {/* Web inline confirm — delete */}
+        {confirmDelete && (
+          <View style={styles.confirmBox}>
+            <Text style={styles.confirmText}>
+              This will permanently delete your account and anonymise all your data. This action cannot be undone.
+            </Text>
+            <View style={styles.confirmActions}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmDelete(false)}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.saveBtn, { backgroundColor: '#DC2626' }]} onPress={doDeleteAccount}>
+                <Text style={styles.saveBtnText}>Delete Account</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Legal links */}
+        <View style={styles.legalLinks}>
+          <Pressable onPress={() => router.push('/(legal)/terms')}>
+            <Text style={styles.legalLink}>Terms of Service</Text>
+          </Pressable>
+          <Text style={styles.legalDot}>·</Text>
+          <Pressable onPress={() => router.push('/(legal)/privacy')}>
+            <Text style={styles.legalLink}>Privacy Policy</Text>
+          </Pressable>
+          <Text style={styles.legalDot}>·</Text>
+          <Pressable onPress={() => router.push('/(legal)/refund')}>
+            <Text style={styles.legalLink}>Refund Policy</Text>
+          </Pressable>
+        </View>
+
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -491,7 +566,7 @@ const BORDER = '#F3F4F6'
 
 const styles = StyleSheet.create({
   root:   { flex: 1, backgroundColor: '#F9FAFB' },
-  scroll: { alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 },
+  scroll: { alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 120 },
 
   // ── Hero header (dashboard style) ──
   heroCard: {
@@ -618,4 +693,17 @@ const styles = StyleSheet.create({
   },
   confirmText:    { color: DARK, fontSize: 15, textAlign: 'center', marginBottom: 16 },
   confirmActions: { flexDirection: 'row', gap: 10 },
+
+  deleteBtn: {
+    width: '100%', backgroundColor: '#fff', borderRadius: 14, paddingVertical: 15,
+    alignItems: 'center', borderWidth: 1, borderColor: '#FECACA', marginTop: 10,
+  },
+  deleteBtnText: { color: '#DC2626', fontWeight: '700', fontSize: 14 },
+
+  legalLinks: {
+    flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center',
+    gap: 6, marginTop: 20, marginBottom: 10,
+  },
+  legalLink: { color: GREY, fontSize: 12, textDecorationLine: 'underline' },
+  legalDot:  { color: '#D1D5DB', fontSize: 12 },
 })

@@ -17,6 +17,7 @@ import { useEffect } from 'react'
 import { Ionicons } from '@expo/vector-icons'
 
 export default function ProviderRegisterScreen() {
+  // (legal consent is declared below after other state)
   const { register } = useProviderAuth()
   const router       = useRouter()
 
@@ -37,6 +38,7 @@ export default function ProviderRegisterScreen() {
   const [areasLoading, setAreasLoading] = useState(false)
   const [loading,      setLoading]      = useState(false)
   const [error,        setError]        = useState<string | null>(null)
+  const [agreed,       setAgreed]       = useState(false)
 
   useEffect(() => {
     LocationAPI.cities().then(({ cities: c }) => setCities(c)).catch(() => {})
@@ -73,6 +75,10 @@ export default function ProviderRegisterScreen() {
     }
     if (password.length < 6) {
       setError('Password must be at least 6 characters.')
+      return
+    }
+    if (!agreed) {
+      setError('Please agree to the Terms of Service and Privacy Policy.')
       return
     }
     setLoading(true)
@@ -264,10 +270,26 @@ export default function ProviderRegisterScreen() {
             </View>
           )}
 
+          {/* ── Consent checkbox ── */}
+          <Pressable style={styles.checkRow} onPress={() => setAgreed(!agreed)}>
+            <View style={[styles.checkBox, agreed && styles.checkBoxChecked]}>
+              {agreed && <Ionicons name="checkmark" size={14} color="#fff" />}
+            </View>
+            <Text style={styles.checkText}>
+              I agree to the{' '}
+              <Text style={styles.checkLink} onPress={() => router.push('/(legal)/provider-terms')}>Provider Partner Agreement</Text>
+              ,{' '}
+              <Text style={styles.checkLink} onPress={() => router.push('/(legal)/provider-privacy')}>Privacy Policy</Text>
+              {' '}and{' '}
+              <Text style={styles.checkLink} onPress={() => router.push('/(legal)/refund')}>Refund Policy</Text>
+              , and confirm I am 18 years or older.
+            </Text>
+          </Pressable>
+
           <Pressable
-            style={[styles.btn, loading && styles.btnDisabled]}
+            style={[styles.btn, (loading || !agreed) && styles.btnDisabled]}
             onPress={handleRegister}
-            disabled={loading}
+            disabled={loading || !agreed}
           >
             {loading
               ? <ActivityIndicator color="#fff" />
@@ -395,4 +417,10 @@ const styles = StyleSheet.create({
 
   userLink:     { alignItems: 'center', marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#ebebf5' },
   userLinkText: { color: '#7c6af7', fontSize: 13 },
+
+  checkRow:       { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 16, marginTop: 16 },
+  checkBox:       { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: '#ccc', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  checkBoxChecked:{ backgroundColor: '#7c6af7', borderColor: '#7c6af7' },
+  checkText:      { flex: 1, color: '#666', fontSize: 13, lineHeight: 19 },
+  checkLink:      { color: '#7c6af7', fontWeight: '700', textDecorationLine: 'underline' },
 })

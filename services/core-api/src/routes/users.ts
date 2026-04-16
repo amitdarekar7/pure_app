@@ -152,4 +152,63 @@ export async function userRoutes(app: FastifyInstance) {
       return reply.status(204).send()
     },
   )
+
+  // ── DELETE /v1/users/me ───────────────────────────────────────────────────
+  // Soft-delete the user account: anonymise PII, mark as deleted.
+  // DPDPA compliance — right to erasure.
+  app.delete('/me', async (req, reply) => {
+    const uid = req.firebaseUid
+
+    const { rows } = await app.db.query<{ id: string }>(
+      `SELECT id FROM users WHERE firebase_uid = $1`,
+      [uid],
+    )
+    if (!rows[0]) return reply.status(404).send({ error: 'User not found' })
+
+    const userId = rows[0].id
+
+    const client = await app.db.connect()
+    try {
+      await client.query('BEGIN')
+
+      // Anonymise profile
+      await client.query(
+        `UPDATE profiles
+         SET display_name = 'Deleted User',
+             avatar_url   = NULL,
+             bio          = NULL,
+             address      = NULL,
+             updated_at   = NOW()
+         WHERE user_id = $1`,
+        [userId],
+      )
+
+      // Anonymise user row
+      await client.query(
+        `UPDATE users
+         SET email      = 'deleted_' || id || '@deleted.local',
+             phone      = NULL,
+             status     = 'deleted',
+             deleted_at = NOW(),
+             updated_at = NOW()
+         WHERE id = $1`,
+        [userId],
+      )
+
+      // Remove push tokens
+      await client.query(
+        `DELETE FROM devices WHERE user_id = $1`,
+        [userId],
+      )
+
+      await client.query('COMMIT')
+    } catch (err) {
+      await client.query('ROLLBACK')
+      throw err
+    } finally {
+      client.release()
+    }
+
+    return reply.status(200).send({ ok: true, message: 'Account deleted. Your data has been anonymised.' })
+  })
 }

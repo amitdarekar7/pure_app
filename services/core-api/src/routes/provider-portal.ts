@@ -183,8 +183,15 @@ export async function providerPortalRoutes(app: FastifyInstance) {
         phone:             string | null
         status:            string
         profile_image_url: string | null
+        pan_number:        string | null
+        bank_account_number: string | null
+        bank_ifsc:         string | null
+        bank_holder_name:  string | null
+        aadhaar_last4:     string | null
+        gst_number:        string | null
       }>(
-        `SELECT id, name, address, phone, status, profile_image_url
+        `SELECT id, name, address, phone, status, profile_image_url,
+                pan_number, bank_account_number, bank_ifsc, bank_holder_name, aadhaar_last4, gst_number
            FROM providers WHERE id = $1`,
         [ctx.providerId],
       )
@@ -229,14 +236,14 @@ export async function providerPortalRoutes(app: FastifyInstance) {
   // ─────────────────────────────────────────────────────────────────────────
   // PATCH /v1/provider/me — update provider profile (name, phone, address)
   // ─────────────────────────────────────────────────────────────────────────
-  app.patch<{ Body: { name?: string; phone?: string; address?: string; profileImageUrl?: string } }>(
+  app.patch<{ Body: { name?: string; phone?: string; address?: string; profileImageUrl?: string; panNumber?: string; bankAccountNumber?: string; bankIfsc?: string; bankHolderName?: string; aadhaarLast4?: string; gstNumber?: string } }>(
     '/me',
     { preHandler: requireAuth },
     async (req, reply) => {
       const ctx = await requireProviderAuth(app, req, reply)
       if (!ctx) return
 
-      const { name, phone, address, profileImageUrl } = req.body ?? {}
+      const { name, phone, address, profileImageUrl, panNumber, bankAccountNumber, bankIfsc, bankHolderName, aadhaarLast4, gstNumber } = req.body ?? {}
 
       const flagged = checkTextFields({ name, address })
       if (flagged) return reply.status(400).send({ error: `${flagged} contains inappropriate language` })
@@ -275,6 +282,42 @@ export async function providerPortalRoutes(app: FastifyInstance) {
         sets.push(`profile_image_url = $${idx++}`)
         vals.push(profileImageUrl?.trim() || null)
       }
+      if (panNumber !== undefined) {
+        if (panNumber && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panNumber.trim().toUpperCase()))
+          return reply.status(400).send({ error: 'Invalid PAN format (e.g. ABCDE1234F)' })
+        sets.push(`pan_number = $${idx++}`)
+        vals.push(panNumber?.trim().toUpperCase() || null)
+      }
+      if (bankAccountNumber !== undefined) {
+        if (bankAccountNumber && !/^\d{9,18}$/.test(bankAccountNumber.trim()))
+          return reply.status(400).send({ error: 'Bank account number must be 9–18 digits' })
+        sets.push(`bank_account_number = $${idx++}`)
+        vals.push(bankAccountNumber?.trim() || null)
+      }
+      if (bankIfsc !== undefined) {
+        if (bankIfsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(bankIfsc.trim().toUpperCase()))
+          return reply.status(400).send({ error: 'Invalid IFSC format (e.g. SBIN0001234)' })
+        sets.push(`bank_ifsc = $${idx++}`)
+        vals.push(bankIfsc?.trim().toUpperCase() || null)
+      }
+      if (bankHolderName !== undefined) {
+        if (bankHolderName && (bankHolderName.trim().length < 2 || !/^[A-Za-z\s.'\-]+$/.test(bankHolderName.trim())))
+          return reply.status(400).send({ error: 'Holder name must be at least 2 characters (letters, spaces, dots, hyphens only)' })
+        sets.push(`bank_holder_name = $${idx++}`)
+        vals.push(bankHolderName?.trim() || null)
+      }
+      if (aadhaarLast4 !== undefined) {
+        if (aadhaarLast4 && !/^\d{4}$/.test(aadhaarLast4.trim()))
+          return reply.status(400).send({ error: 'Aadhaar last 4 must be exactly 4 digits' })
+        sets.push(`aadhaar_last4 = $${idx++}`)
+        vals.push(aadhaarLast4?.trim() || null)
+      }
+      if (gstNumber !== undefined) {
+        if (gstNumber && !/^\d{2}[A-Z]{5}\d{4}[A-Z]\d[Z][A-Z0-9]$/.test(gstNumber.trim().toUpperCase()))
+          return reply.status(400).send({ error: 'Invalid GST format' })
+        sets.push(`gst_number = $${idx++}`)
+        vals.push(gstNumber?.trim().toUpperCase() || null)
+      }
 
       if (sets.length === 0) return reply.status(400).send({ error: 'No fields to update' })
 
@@ -284,7 +327,8 @@ export async function providerPortalRoutes(app: FastifyInstance) {
       const { rows } = await app.db.query<{
         id: string; name: string; address: string | null; phone: string | null; status: string; profile_image_url: string | null
       }>(
-        `UPDATE providers SET ${sets.join(', ')} WHERE id = $${idx} RETURNING id, name, address, phone, status, profile_image_url`,
+        `UPDATE providers SET ${sets.join(', ')} WHERE id = $${idx}
+         RETURNING id, name, address, phone, status, profile_image_url, pan_number, bank_account_number, bank_ifsc, bank_holder_name, aadhaar_last4, gst_number`,
         vals,
       )
 
@@ -1007,5 +1051,63 @@ export async function providerPortalRoutes(app: FastifyInstance) {
       [ctx.providerId, !!autoRenew],
     )
     return { ok: true }
+  })
+
+  // ── DELETE /v1/provider/me ──────────────────────────────────────────────
+  // Soft-delete provider account: anonymise PII, mark as deleted.
+  // DPDPA compliance — right to erasure. KYC data retained 7 years per tax law.
+  app.delete('/me', async (req, reply) => {
+    const ctx = await requireProviderAuth(app, req, reply)
+    if (!ctx) return
+
+    const client = await app.db.connect()
+    try {
+      await client.query('BEGIN')
+
+      // Deactivate all services
+      await client.query(
+        `UPDATE provider_services SET is_available = false WHERE provider_id = $1`,
+        [ctx.providerId],
+      )
+
+      // Anonymise provider profile (keep KYC/financial data for 7-year retention)
+      await client.query(
+        `UPDATE providers
+         SET name          = 'Deleted Provider',
+             phone         = NULL,
+             address        = NULL,
+             profile_image_url = NULL,
+             updated_at     = NOW()
+         WHERE id = $1`,
+        [ctx.providerId],
+      )
+
+      // Anonymise user row
+      await client.query(
+        `UPDATE users
+         SET email      = 'deleted_' || id || '@deleted.local',
+             phone      = NULL,
+             status     = 'deleted',
+             deleted_at = NOW(),
+             updated_at = NOW()
+         WHERE id = $1`,
+        [ctx.userId],
+      )
+
+      // Remove push tokens
+      await client.query(
+        `DELETE FROM devices WHERE user_id = $1`,
+        [ctx.userId],
+      )
+
+      await client.query('COMMIT')
+    } catch (err) {
+      await client.query('ROLLBACK')
+      throw err
+    } finally {
+      client.release()
+    }
+
+    return reply.status(200).send({ ok: true, message: 'Account deleted. Your data has been anonymised. KYC records retained per legal obligation.' })
   })
 }

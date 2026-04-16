@@ -55,6 +55,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)"            options={{ headerShown: false }} />
         <Stack.Screen name="(provider-auth)"   options={{ headerShown: false, contentStyle: { backgroundColor: '#f8f8f8' } }} />
         <Stack.Screen name="(provider)"        options={{ headerShown: false, contentStyle: { backgroundColor: '#f8f8f8' } }} />
+        <Stack.Screen name="(legal)"            options={{ headerShown: false }} />
         <Stack.Screen name="+not-found"        options={{ title: 'Not Found' }} />
         <Stack.Screen name="provider/[id]"     options={{ headerShown: false }} />
       </Stack>
