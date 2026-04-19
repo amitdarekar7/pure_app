@@ -49,6 +49,8 @@ export const UsersAPI = {
   devices:  ()                              => _auth<{ devices: Device[] }>('GET', `${CORE}/v1/users/me/devices`),
   registerPushToken: (token: string, platform: string) =>
     _auth<void>('PUT', `${CORE}/v1/users/me/push-token`, { token, platform }),
+  exportData: () =>
+    _auth<ExportData>('GET', `${CORE}/v1/users/me/export`),
 }
 
 // ─── Search API (now served by core-api) ──────────────────────────────────────
@@ -129,6 +131,14 @@ export const BookingsAPI = {
   chooseVenue: (id: string) =>
     _auth<{ booking: { id: string; payment_mode: string } }>(
       'POST', `${CORE}/v1/bookings/${encodeURIComponent(id)}/choose-venue`, {},
+    ),
+  priceBreakup: (providerServiceId: string, paymentMode: 'prepaid' | 'pay_at_venue' = 'prepaid') =>
+    _post<{ breakup: PriceBreakup }>(
+      `${CORE}/v1/bookings/price-breakup`, { providerServiceId, paymentMode },
+    ),
+  invoice: (id: string) =>
+    _auth<{ invoice: Invoice }>(
+      'GET', `${CORE}/v1/bookings/${encodeURIComponent(id)}/invoice`,
     ),
 }
 
@@ -282,6 +292,16 @@ export const AIAPI = {
     _post<{ items: RecommendedItem[] }>(`${AI}/v1/recommendations`, { user_id: userId, context, limit }),
   similar: (itemId: string, limit = 5) =>
     _post<{ items: RecommendedItem[] }>(`${AI}/v1/similar`, { item_id: itemId, limit }),
+}
+
+// ─── Platform API (public) ────────────────────────────────────────────────────
+export const PlatformAPI = {
+  info: () =>
+    _get<{ info: PlatformInfo }>(`${CORE}/v1/platform/info`),
+  fileComplaint: (p: { category: string; description: string; providerId?: string }) =>
+    _auth<{ complaint: Complaint }>('POST', `${CORE}/v1/platform/complaints`, p),
+  myComplaints: () =>
+    _auth<{ complaints: Complaint[] }>('GET', `${CORE}/v1/platform/complaints/my`),
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -549,6 +569,69 @@ export interface PromotionRecord {
   status:         'active' | 'expired' | 'cancelled'
   starts_at:      string
   expires_at:     string
+}
+
+export interface PriceBreakup {
+  service_title:        string
+  duration_mins:        number
+  original_price_paise: number
+  discount_pct:         number
+  discount_paise:       number
+  service_price_paise:  number
+  platform_fee_paise:   number
+  gst_on_platform_fee:  number
+  tcs_paise:            number
+  total_paise:          number
+  payment_mode:         string
+}
+
+export interface Invoice {
+  invoice_number:        string
+  service_amount_paise:  number
+  discount_paise:        number
+  taxable_value_paise:   number
+  cgst_paise:            number
+  sgst_paise:            number
+  total_tax_paise:       number
+  total_paise:           number
+  financial_year:        string
+  platform_gstin:        string
+  platform_name:         string
+  platform_address:      string
+  provider_name:         string
+  created_at:            string
+}
+
+export interface PlatformInfo {
+  platform_legal_name:  string
+  platform_cin:         string
+  platform_gstin:       string
+  platform_address:     string
+  platform_email:       string
+  platform_phone:       string
+  grievance_officer:    string
+  grievance_email:      string
+  nodal_officer:        string
+  nodal_email:          string
+}
+
+export interface ExportData {
+  exported_at: string
+  profile:     User | null
+  bookings:    any[]
+  invoices:    any[]
+  devices:     any[]
+}
+
+export interface Complaint {
+  id:            string
+  category:      string
+  description:   string
+  status:        string
+  resolution:    string | null
+  provider_name: string | null
+  created_at:    string
+  resolved_at:   string | null
 }
 
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────

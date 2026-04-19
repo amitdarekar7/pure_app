@@ -19,7 +19,7 @@ import * as Location from 'expo-location'
 import { useRouter } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import { useAuth } from '../../lib/auth-context'
-import { UsersAPI } from '../../lib/api'
+import { UsersAPI, PlatformAPI } from '../../lib/api'
 
 const LOGO = require('../../assets/images/logo_pure.png')
 
@@ -41,6 +41,7 @@ export default function ProfileScreen() {
   const [confirmLogout, setConfirmLogout] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting,      setDeleting]      = useState(false)
+  const [exporting,     setExporting]     = useState(false)
 
   const [name,            setName]            = useState(user?.display_name ?? '')
   const [phone,           setPhone]           = useState(user?.phone ?? '')
@@ -314,6 +315,29 @@ export default function ProfileScreen() {
     }
   }
 
+  async function handleExportData() {
+    setExporting(true)
+    setError(null)
+    try {
+      const data = await UsersAPI.exportData()
+      if (Platform.OS === 'web') {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `pure-app-data-${new Date().toISOString().slice(0, 10)}.json`
+        a.click()
+        URL.revokeObjectURL(url)
+      } else {
+        Alert.alert('Data Exported', `Your data has been exported (${data.bookings?.length ?? 0} bookings, ${data.invoices?.length ?? 0} invoices). Full data portability download is available on the web version.`)
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to export data')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const firstName = user?.display_name
     ? user.display_name.split(' ')[0]
     : (user?.email ?? 'User').split('@')[0]
@@ -529,6 +553,21 @@ export default function ProfileScreen() {
           </View>
         )}
 
+        {/* Data & Support actions */}
+        {!editing && !confirmLogout && !confirmDelete && (
+          <View style={styles.dataActions}>
+            <TouchableOpacity style={styles.dataBtn} onPress={handleExportData} activeOpacity={0.7} disabled={exporting}>
+              {exporting
+                ? <ActivityIndicator color={ACCENT} size="small" />
+                : <><Text style={styles.dataBtnIcon}>📥</Text><Text style={styles.dataBtnText}>Export My Data</Text></>}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.dataBtn} onPress={() => router.push('/(legal)/complaint' as any)} activeOpacity={0.7}>
+              <Text style={styles.dataBtnIcon}>📝</Text>
+              <Text style={styles.dataBtnText}>File a Complaint</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Legal links */}
         <View style={styles.legalLinks}>
           <Pressable onPress={() => router.push('/(legal)/terms')}>
@@ -541,6 +580,10 @@ export default function ProfileScreen() {
           <Text style={styles.legalDot}>·</Text>
           <Pressable onPress={() => router.push('/(legal)/refund')}>
             <Text style={styles.legalLink}>Refund Policy</Text>
+          </Pressable>
+          <Text style={styles.legalDot}>·</Text>
+          <Pressable onPress={() => router.push('/(legal)/about')}>
+            <Text style={styles.legalLink}>About Us</Text>
           </Pressable>
         </View>
 
@@ -699,6 +742,17 @@ const styles = StyleSheet.create({
     alignItems: 'center', borderWidth: 1, borderColor: '#FECACA', marginTop: 10,
   },
   deleteBtnText: { color: '#DC2626', fontWeight: '700', fontSize: 14 },
+
+  dataActions: {
+    flexDirection: 'row', gap: 10, marginTop: 12, width: '100%',
+  },
+  dataBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, backgroundColor: '#fff', borderRadius: 14, paddingVertical: 13,
+    borderWidth: 1, borderColor: BORDER,
+  },
+  dataBtnIcon: { fontSize: 14 },
+  dataBtnText: { color: DARK, fontWeight: '600', fontSize: 13 },
 
   legalLinks: {
     flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center',

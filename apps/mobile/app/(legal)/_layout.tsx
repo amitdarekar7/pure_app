@@ -13,6 +13,8 @@ export default function LegalLayout() {
       <Stack.Screen name="refund" />
       <Stack.Screen name="provider-terms" />
       <Stack.Screen name="provider-privacy" />
+      <Stack.Screen name="about" />
+      <Stack.Screen name="complaint" />
     </Stack>
   )
 }

@@ -10,6 +10,75 @@ function generateOTP(): string {
   return String(randomInt(100000, 999999))
 }
 
+/** Get Indian financial year string: Apr 2026 → '2026-27', Jan 2027 → '2026-27' */
+function getCurrentFY(): string {
+  const now = new Date()
+  const year = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1
+  return `${year}-${String(year + 1).slice(2)}`
+}
+
+/** Generate and store a GST-compliant invoice for a paid booking */
+async function generateInvoice(
+  app: FastifyInstance,
+  bookingId: string,
+  bk: {
+    user_id: string; provider_id: string;
+    price_paise: number; commission_paise: number;
+    gst_paise: number; original_price_paise: number | null; discount_pct: number;
+    provider_name: string; provider_address: string | null;
+    user_name: string | null; user_email: string;
+  },
+) {
+  const fy = getCurrentFY()
+
+  // Get next invoice number atomically
+  const { rows: seqRows } = await app.db.query<{ last_number: number }>(
+    `INSERT INTO invoice_sequences (financial_year, last_number)
+     VALUES ($1, 1)
+     ON CONFLICT (financial_year)
+     DO UPDATE SET last_number = invoice_sequences.last_number + 1
+     RETURNING last_number`,
+    [fy],
+  )
+  const seqNum = seqRows[0].last_number
+  const fyShort = fy.replace('-', '')
+  const invoiceNumber = `PURE/${fyShort}/${String(seqNum).padStart(6, '0')}`
+
+  // Platform details
+  const { rows: configRows } = await app.db.query<{ key: string; value: string }>(
+    `SELECT key, value FROM platform_config WHERE key IN ('platform_gstin', 'platform_legal_name', 'platform_address')`,
+  )
+  const cfg = Object.fromEntries(configRows.map(r => [r.key, r.value]))
+
+  // Tax breakup on commission (platform's taxable value)
+  const taxableValue = bk.commission_paise
+  const cgst = Math.round(bk.gst_paise / 2)
+  const sgst = bk.gst_paise - cgst
+  const discountPaise = bk.original_price_paise
+    ? bk.original_price_paise - bk.price_paise
+    : 0
+
+  await app.db.query(
+    `INSERT INTO invoices
+       (invoice_number, booking_id, user_id, provider_id,
+        service_amount_paise, discount_paise, taxable_value_paise,
+        cgst_paise, sgst_paise, total_tax_paise, total_paise,
+        financial_year, platform_gstin, platform_name, platform_address,
+        provider_name, provider_address, user_name, user_email)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+    [
+      invoiceNumber, bookingId, bk.user_id, bk.provider_id,
+      bk.price_paise, discountPaise, taxableValue,
+      cgst, sgst, bk.gst_paise, bk.price_paise + bk.gst_paise,
+      fy, cfg.platform_gstin ?? '', cfg.platform_legal_name ?? 'Pure App', cfg.platform_address ?? '',
+      bk.provider_name, bk.provider_address ?? null,
+      bk.user_name ?? null, bk.user_email,
+    ],
+  )
+
+  app.log.info(`Invoice ${invoiceNumber} generated for booking ${bookingId}`)
+}
+
 export async function bookingRoutes(app: FastifyInstance) {
   /**
    * POST /v1/bookings
@@ -89,15 +158,46 @@ export async function bookingRoutes(app: FastifyInstance) {
         : originalPricePaise
 
       // Commission only applies to prepaid bookings
-      // Fetch platform commission rate
-      const { rows: configRows } = await app.db.query<{ value: string }>(
-        `SELECT value FROM platform_config WHERE key = 'commission_pct'`,
+      // Fetch platform commission rate + tax rates
+      const { rows: configRows } = await app.db.query<{ key: string; value: string }>(
+        `SELECT key, value FROM platform_config WHERE key IN ('commission_pct', 'gst_rate', 'tcs_rate', 'tds_rate', 'tds_threshold_paise')`,
       )
+      const configMap = Object.fromEntries(configRows.map(r => [r.key, r.value]))
       const commissionPct = paymentMode === 'prepaid'
-        ? (configRows[0] ? parseFloat(configRows[0].value) : 7.0)
+        ? (configMap.commission_pct ? parseFloat(configMap.commission_pct) : 7.0)
         : 0
       const commissionPaise = Math.round(pricePaise * commissionPct / 100)
-      const providerPaise = pricePaise - commissionPaise
+
+      // GST 18% on platform commission (our service fee)
+      const gstRate = configMap.gst_rate ? parseFloat(configMap.gst_rate) : 18.0
+      const gstPaise = paymentMode === 'prepaid'
+        ? Math.round(commissionPaise * gstRate / 100)
+        : 0
+
+      // TCS 1% on net taxable supplies (Sec 52 CGST)
+      const tcsRate = configMap.tcs_rate ? parseFloat(configMap.tcs_rate) : 1.0
+      const tcsPaise = paymentMode === 'prepaid'
+        ? Math.round(pricePaise * tcsRate / 100)
+        : 0
+
+      // TDS 1% u/s 194-O — only if provider's FY earnings exceed ₹5L
+      const tdsRate = configMap.tds_rate ? parseFloat(configMap.tds_rate) : 1.0
+      const tdsThreshold = configMap.tds_threshold_paise ? parseInt(configMap.tds_threshold_paise) : 50000000
+      let tdsPaise = 0
+      if (paymentMode === 'prepaid') {
+        const fy = getCurrentFY()
+        const { rows: fyRows } = await app.db.query<{ gross_paise: string }>(
+          `SELECT gross_paise FROM provider_fy_earnings WHERE provider_id = $1 AND financial_year = $2`,
+          [provider_id, fy],
+        )
+        const cumulative = fyRows[0] ? parseInt(fyRows[0].gross_paise) : 0
+        if (cumulative + pricePaise > tdsThreshold) {
+          tdsPaise = Math.round(pricePaise * tdsRate / 100)
+        }
+      }
+
+      // Provider receives: price - commission - GST - TCS - TDS
+      const providerPaise = pricePaise - commissionPaise - gstPaise - tcsPaise - tdsPaise
 
       // Generate OTP for check-in (user shows to provider upon arrival)
       const checkinOtp = generateOTP()
@@ -106,12 +206,14 @@ export async function bookingRoutes(app: FastifyInstance) {
         `INSERT INTO bookings
            (user_id, provider_id, provider_service_id, scheduled_at, price_paise, notes,
             commission_pct, commission_paise, provider_paise,
-            payment_mode, original_price_paise, discount_pct, checkin_otp)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            payment_mode, original_price_paise, discount_pct, checkin_otp,
+            gst_paise, tcs_paise, tds_paise)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          RETURNING id, status, scheduled_at`,
         [userId, provider_id, providerServiceId, scheduled.toISOString(), pricePaise, notes ?? null,
          commissionPct, commissionPaise, providerPaise,
-         paymentMode, originalPricePaise, appliedDiscount, checkinOtp],
+         paymentMode, originalPricePaise, appliedDiscount, checkinOtp,
+         gstPaise, tcsPaise, tdsPaise],
       )
 
       const booking = rows[0]
@@ -136,6 +238,9 @@ export async function bookingRoutes(app: FastifyInstance) {
           commission_pct: commissionPct,
           commission_paise: commissionPaise,
           provider_paise: providerPaise,
+          gst_paise: gstPaise,
+          tcs_paise: tcsPaise,
+          tds_paise: tdsPaise,
           notes:         notes ?? null,
           user_name:     uRows[0].display_name ?? null,
           user_phone:    uRows[0].phone ?? null,
@@ -168,6 +273,22 @@ export async function bookingRoutes(app: FastifyInstance) {
         app.log.error({ err }, '[fcm] Failed to send booking push notification'),
       )
 
+      // ── Update provider FY earnings (for TDS threshold tracking) ────────
+      if (paymentMode === 'prepaid') {
+        const fy = getCurrentFY()
+        app.db.query(
+          `INSERT INTO provider_fy_earnings (provider_id, financial_year, gross_paise, tds_paise)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (provider_id, financial_year)
+           DO UPDATE SET gross_paise = provider_fy_earnings.gross_paise + $3,
+                         tds_paise   = provider_fy_earnings.tds_paise + $4,
+                         updated_at  = NOW()`,
+          [provider_id, fy, pricePaise, tdsPaise],
+        ).catch((err: Error) =>
+          app.log.error({ err }, '[db] Failed to update provider FY earnings'),
+        )
+      }
+
       return reply.status(201).send({
         booking: {
           ...booking,
@@ -176,6 +297,11 @@ export async function bookingRoutes(app: FastifyInstance) {
           price_paise: pricePaise,
           original_price_paise: originalPricePaise,
           discount_pct: appliedDiscount,
+          commission_paise: commissionPaise,
+          gst_paise: gstPaise,
+          tcs_paise: tcsPaise,
+          tds_paise: tdsPaise,
+          provider_paise: providerPaise,
         },
       })
     },
@@ -571,17 +697,26 @@ export async function bookingRoutes(app: FastifyInstance) {
       )
       if (!uRows[0]) return reply.status(401).send({ error: 'user not found' })
 
-      // Fetch booking + provider Route account for split payment
+      // Fetch booking + provider Route account + tax data for split payment & invoice
       const { rows: bRows } = await app.db.query<{
         id: string; user_id: string; payment_status: string;
         provider_id: string; provider_paise: number; commission_paise: number;
+        price_paise: number; gst_paise: number; tcs_paise: number; tds_paise: number;
+        original_price_paise: number | null; discount_pct: number;
         razorpay_account_id: string | null; razorpay_kyc_status: string;
+        provider_name: string; provider_address: string | null;
+        user_name: string | null; user_email: string;
       }>(
         `SELECT b.id, b.user_id, b.payment_status,
                 b.provider_id, b.provider_paise, b.commission_paise,
-                p.razorpay_account_id, p.razorpay_kyc_status
+                b.price_paise, b.gst_paise, b.tcs_paise, b.tds_paise,
+                b.original_price_paise, b.discount_pct,
+                p.razorpay_account_id, p.razorpay_kyc_status,
+                p.name AS provider_name, p.address AS provider_address,
+                u2.display_name AS user_name, u2.email AS user_email
            FROM bookings b
            JOIN providers p ON p.id = b.provider_id
+           JOIN users u2 ON u2.id = b.user_id
           WHERE b.id = $1`,
         [id],
       )
@@ -624,8 +759,13 @@ export async function bookingRoutes(app: FastifyInstance) {
         [id, razorpay_payment_id],
       )
 
-      // ── Razorpay Route: split payment to provider ───────────────────────
+      // ── Generate invoice (fire-and-forget) ──────────────────────────────
       const bk = bRows[0]
+      generateInvoice(app, id, bk).catch((err: Error) =>
+        app.log.error({ err }, `[invoice] Failed to generate invoice for booking ${id}`),
+      )
+
+      // ── Razorpay Route: split payment to provider ───────────────────────
       if (bk.razorpay_account_id && bk.razorpay_kyc_status === 'activated' && bk.provider_paise > 0) {
         // Transfer provider's share to their linked account; commission stays in ours
         const RZP_KEY    = process.env.RAZORPAY_KEY_ID!
@@ -760,6 +900,98 @@ export async function bookingRoutes(app: FastifyInstance) {
       )
 
       return reply.send({ booking: { id, payment_mode: 'pay_at_venue' } })
+    },
+  )
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // GET /v1/bookings/:id/invoice
+  // Returns the invoice JSON for a paid booking (only the booking's user).
+  // ─────────────────────────────────────────────────────────────────────────
+  app.get<{ Params: { id: string } }>(
+    '/:id/invoice',
+    { preHandler: requireAuth },
+    async (req, reply) => {
+      const { id } = req.params
+      if (!/^[0-9a-f-]{36}$/i.test(id)) {
+        return reply.status(400).send({ error: 'invalid booking id' })
+      }
+
+      const { rows: uRows } = await app.db.query<{ id: string }>(
+        `SELECT id FROM users WHERE firebase_uid = $1`,
+        [req.firebaseUid],
+      )
+      if (!uRows[0]) return reply.status(401).send({ error: 'user not found' })
+
+      const { rows } = await app.db.query(
+        `SELECT i.*, b.scheduled_at, ps.title AS service_title, ps.duration_mins,
+                b.payment_mode, b.tcs_paise, b.tds_paise, b.commission_pct
+           FROM invoices i
+           JOIN bookings b ON b.id = i.booking_id
+           JOIN provider_services ps ON ps.id = b.provider_service_id
+          WHERE i.booking_id = $1 AND i.user_id = $2`,
+        [id, uRows[0].id],
+      )
+
+      if (!rows[0]) return reply.status(404).send({ error: 'invoice not found' })
+
+      return reply.send({ invoice: rows[0] })
+    },
+  )
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // POST /v1/bookings/price-breakup
+  // Preview price breakdown before confirming a booking (no auth required).
+  // Body: { providerServiceId, paymentMode? }
+  // ─────────────────────────────────────────────────────────────────────────
+  app.post<{
+    Body: { providerServiceId: string; paymentMode?: 'prepaid' | 'pay_at_venue' }
+  }>(
+    '/price-breakup',
+    async (req, reply) => {
+      const { providerServiceId, paymentMode = 'prepaid' } = req.body ?? {}
+      if (!providerServiceId || !/^[0-9a-f-]{36}$/i.test(providerServiceId)) {
+        return reply.status(400).send({ error: 'invalid providerServiceId' })
+      }
+
+      const { rows: sRows } = await app.db.query<{
+        price_paise: number; discount_pct: number; title: string; duration_mins: number
+      }>(
+        `SELECT price_paise, discount_pct, title, duration_mins FROM provider_services WHERE id = $1`,
+        [providerServiceId],
+      )
+      if (!sRows[0]) return reply.status(404).send({ error: 'service not found' })
+
+      const { price_paise: originalPrice, discount_pct, title, duration_mins } = sRows[0]
+      const discountPaise = discount_pct > 0 ? Math.round(originalPrice * discount_pct / 100) : 0
+      const pricePaise = originalPrice - discountPaise
+
+      const { rows: configRows } = await app.db.query<{ key: string; value: string }>(
+        `SELECT key, value FROM platform_config WHERE key IN ('commission_pct', 'gst_rate', 'tcs_rate')`,
+      )
+      const cfg = Object.fromEntries(configRows.map(r => [r.key, r.value]))
+
+      const commPct   = paymentMode === 'prepaid' ? (cfg.commission_pct ? parseFloat(cfg.commission_pct) : 7.0) : 0
+      const commPaise = Math.round(pricePaise * commPct / 100)
+      const gstRate   = cfg.gst_rate ? parseFloat(cfg.gst_rate) : 18.0
+      const gstPaise  = paymentMode === 'prepaid' ? Math.round(commPaise * gstRate / 100) : 0
+      const tcsRate   = cfg.tcs_rate ? parseFloat(cfg.tcs_rate) : 1.0
+      const tcsPaise  = paymentMode === 'prepaid' ? Math.round(pricePaise * tcsRate / 100) : 0
+
+      return reply.send({
+        breakup: {
+          service_title:       title,
+          duration_mins,
+          original_price_paise: originalPrice,
+          discount_pct,
+          discount_paise:       discountPaise,
+          service_price_paise:  pricePaise,
+          platform_fee_paise:   commPaise,
+          gst_on_platform_fee:  gstPaise,
+          tcs_paise:            tcsPaise,
+          total_paise:          pricePaise,  // user pays only service price (GST/TCS are deducted from provider share)
+          payment_mode:         paymentMode,
+        },
+      })
     },
   )
 }

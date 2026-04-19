@@ -15,7 +15,7 @@ import { useState } from 'react'
 import { useRouter } from 'expo-router'
 import * as ImagePicker from 'expo-image-picker'
 import { useProviderAuth } from '../../lib/provider-auth-context'
-import { ProviderPortalAPI } from '../../lib/api'
+import { ProviderPortalAPI, UsersAPI } from '../../lib/api'
 
 const LOGO = require('../../assets/images/logo_pure.png')
 
@@ -42,6 +42,7 @@ export default function ProviderProfileScreen() {
   const [rzpError,    setRzpError]    = useState<string | null>(null)
   const [confirmDelete,    setConfirmDelete]    = useState(false)
   const [deleting,         setDeleting]         = useState(false)
+  const [exporting,        setExporting]        = useState(false)
 
   const rzpStatus    = providerProfile?.razorpay_kyc_status ?? 'not_connected'
   const rzpAccountId = providerProfile?.razorpay_account_id ?? null
@@ -148,6 +149,28 @@ export default function ProviderProfileScreen() {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to delete account')
     } finally {
       setDeleting(false)
+    }
+  }
+
+  async function handleExportData() {
+    setExporting(true)
+    try {
+      const data = await UsersAPI.exportData()
+      if (Platform.OS === 'web') {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `pure-app-provider-data-${new Date().toISOString().slice(0, 10)}.json`
+        a.click()
+        URL.revokeObjectURL(url)
+      } else {
+        Alert.alert('Data Exported', 'Your data has been prepared. In a future update this will be downloadable as a file.')
+      }
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to export data')
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -384,6 +407,20 @@ export default function ProviderProfileScreen() {
                     <Text style={styles.deleteText}>Delete My Account</Text>
                   </>}
             </Pressable>
+
+            <Pressable style={styles.complaintBtn} onPress={() => router.push('/(legal)/complaint' as any)}>
+              <Text style={styles.logoutIcon}>📝</Text>
+              <Text style={styles.logoutText}>File a Complaint</Text>
+            </Pressable>
+
+            <Pressable style={styles.complaintBtn} onPress={handleExportData} disabled={exporting}>
+              {exporting
+                ? <ActivityIndicator color={ACCENT} size="small" />
+                : <>
+                    <Text style={styles.logoutIcon}>📦</Text>
+                    <Text style={styles.logoutText}>Export My Data</Text>
+                  </>}
+            </Pressable>
           </View>
 
           {/* Web inline confirm — delete */}
@@ -415,6 +452,10 @@ export default function ProviderProfileScreen() {
             <Text style={styles.legalDot}>·</Text>
             <Pressable onPress={() => router.push('/(legal)/refund')}>
               <Text style={styles.legalLink}>Refund Policy</Text>
+            </Pressable>
+            <Text style={styles.legalDot}>·</Text>
+            <Pressable onPress={() => router.push('/(legal)/about')}>
+              <Text style={styles.legalLink}>About Us</Text>
             </Pressable>
           </View>
 
@@ -738,6 +779,18 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   deleteText: { color: '#DC2626', fontSize: 14, fontWeight: '700' },
+  complaintBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+    marginTop: 10,
+  },
 
   confirmBox: {
     backgroundColor: '#FEF2F2', borderRadius: 14, padding: 16, marginTop: 12,

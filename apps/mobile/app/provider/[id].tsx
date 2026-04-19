@@ -19,10 +19,12 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import {
   ProvidersAPI,
   BookingsAPI,
+  PlatformAPI,
   ProviderDetail,
   ProviderServiceItem,
   ProviderImage,
   ProviderAvailability,
+  PriceBreakup,
 } from '../../lib/api'
 import { useAuth } from '../../lib/auth-context'
 
@@ -148,6 +150,9 @@ export default function ProviderDetailPage() {
   const SLOT_ITEM_H = 40
   const SLOT_VISIBLE = 3
 
+  // ── price breakup ──
+  const [breakup, setBreakup] = useState<PriceBreakup | null>(null)
+
   // ── fetch ──
   useEffect(() => {
     let cancelled = false
@@ -168,6 +173,16 @@ export default function ProviderDetailPage() {
   }, [id, sid])
 
   useEffect(() => { setSelectedSlot(null) }, [selectedDate])
+
+  // ── fetch price breakup when service changes ──
+  useEffect(() => {
+    if (!selectedServiceId) { setBreakup(null); return }
+    let cancelled = false
+    BookingsAPI.priceBreakup(selectedServiceId, 'prepaid')
+      .then((data) => { if (!cancelled) setBreakup(data.breakup) })
+      .catch(() => { if (!cancelled) setBreakup(null) })
+    return () => { cancelled = true }
+  }, [selectedServiceId])
 
   const selectedService = services.find(s => s.id === selectedServiceId) ?? null
   const currentWeek = weekDates(weekMonday)
@@ -694,12 +709,84 @@ export default function ProviderDetailPage() {
         </View>
 
         {/* ════════════════════════════════════════════════════════════════════
+            8a. SELLER DETAILS — E-Commerce Rules compliance
+         ════════════════════════════════════════════════════════════════════ */}
+        <View style={styles.sellerCard}>
+          <Text style={styles.sellerTitle}>Seller Details</Text>
+          <View style={styles.sellerRow}>
+            <Text style={styles.sellerLabel}>Name</Text>
+            <Text style={styles.sellerValue}>{provider.name}</Text>
+          </View>
+          {(provider.address || location) && (
+            <View style={styles.sellerRow}>
+              <Text style={styles.sellerLabel}>Address</Text>
+              <Text style={styles.sellerValue}>{provider.address || location}</Text>
+            </View>
+          )}
+          {provider.phone && (
+            <View style={styles.sellerRow}>
+              <Text style={styles.sellerLabel}>Contact</Text>
+              <Text style={styles.sellerValue}>{provider.phone}</Text>
+            </View>
+          )}
+        </View>
+
+        {/* ════════════════════════════════════════════════════════════════════
             8. HELP & SUPPORT
          ════════════════════════════════════════════════════════════════════ */}
         <View style={styles.helpCard}>
           <Text style={styles.helpText}>Have queries or need help with something?</Text>
           <Text style={styles.helpLink}>View help & support ›</Text>
         </View>
+
+        {/* ════════════════════════════════════════════════════════════════════
+            9. PRICE BREAKUP — shown when a service is selected
+         ════════════════════════════════════════════════════════════════════ */}
+        {breakup && (
+          <View style={styles.breakupCard}>
+            <Text style={styles.breakupTitle}>Price Details</Text>
+
+            <View style={styles.breakupRow}>
+              <Text style={styles.breakupLabel}>{breakup.service_title}</Text>
+              <Text style={styles.breakupValue}>{formatRupees(breakup.original_price_paise)}</Text>
+            </View>
+
+            {breakup.discount_paise > 0 && (
+              <View style={styles.breakupRow}>
+                <Text style={[styles.breakupLabel, { color: '#16A34A' }]}>Discount ({breakup.discount_pct}%)</Text>
+                <Text style={[styles.breakupValue, { color: '#16A34A' }]}>-{formatRupees(breakup.discount_paise)}</Text>
+              </View>
+            )}
+
+            <View style={styles.breakupRow}>
+              <Text style={styles.breakupLabel}>Platform fee</Text>
+              <Text style={styles.breakupValue}>{formatRupees(breakup.platform_fee_paise)}</Text>
+            </View>
+
+            <View style={styles.breakupRow}>
+              <Text style={styles.breakupLabel}>GST (on platform fee)</Text>
+              <Text style={styles.breakupValue}>{formatRupees(breakup.gst_on_platform_fee)}</Text>
+            </View>
+
+            {breakup.tcs_paise > 0 && (
+              <View style={styles.breakupRow}>
+                <Text style={styles.breakupLabel}>TCS (1%)</Text>
+                <Text style={styles.breakupValue}>{formatRupees(breakup.tcs_paise)}</Text>
+              </View>
+            )}
+
+            <View style={styles.breakupDivider} />
+
+            <View style={styles.breakupRow}>
+              <Text style={styles.breakupTotal}>Total</Text>
+              <Text style={styles.breakupTotal}>{formatRupees(breakup.total_paise)}</Text>
+            </View>
+
+            <Text style={styles.breakupNote}>
+              Platform fee, GST & TCS are deducted from the provider's share. You pay only the service price.
+            </Text>
+          </View>
+        )}
 
         <View style={{ height: 120 }} />
       </ScrollView>
@@ -1432,4 +1519,93 @@ const styles = StyleSheet.create({
   lbArrowLeft: { left: 16 },
   lbArrowRight: { right: 16 },
   lbArrowText: { color: '#fff', fontSize: 30, fontWeight: '300', marginTop: -2 },
+
+  // ── Price breakup ──
+  breakupCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 18,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  breakupTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#1B1B1B',
+    marginBottom: 14,
+  },
+  breakupRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  breakupLabel: {
+    fontSize: 13,
+    color: '#6B7280',
+  },
+  breakupValue: {
+    fontSize: 13,
+    color: '#374151',
+    fontWeight: '600',
+  },
+  breakupDivider: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+    marginVertical: 8,
+  },
+  breakupTotal: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#1B1B1B',
+  },
+  breakupNote: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    marginTop: 10,
+    lineHeight: 16,
+  },
+
+  // ── Seller details ──
+  sellerCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 18,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  sellerTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#1B1B1B',
+    marginBottom: 10,
+  },
+  sellerRow: {
+    flexDirection: 'row',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  sellerLabel: {
+    width: 70,
+    fontSize: 12,
+    color: '#9CA3AF',
+    fontWeight: '600',
+  },
+  sellerValue: {
+    flex: 1,
+    fontSize: 12,
+    color: '#374151',
+  },
 })
